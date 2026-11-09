@@ -1,17 +1,34 @@
-# JPOG Co-op v2 - controller play + 2-player split-screen for Jurassic Park: Operation Genesis (PC)
+# Jurassic Park: Operation Genesis - Split-screen co-op & dinosaur riding mod (JPOG Co-op v2)
 
-A fan mod for the 2003 PC game **Jurassic Park: Operation Genesis** (JPOG). It adds:
+**Play JPOG (PC, 2003) like a console game: Xbox controller support, 2-player split-screen on one PC, and take control of any dinosaur to walk, fight, roar, eat and sleep.**
+
+## ⬇️ [Download the latest release](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/releases/latest) → `JPOG_Coop_v2.zip`
+
+### Quick start
+1. **You need your own copy of Jurassic Park: Operation Genesis for PC.** No game files are included in this mod.
+2. Unzip `JPOG_Coop_v2.zip` anywhere and double-click **`install.bat`**. It finds the game by itself and asks once whether you want the "easy start".
+3. Start the game with **`Launch JPOG.bat`**.
+4. **For split-screen, connect TWO controllers.** Load a park, then switch on the second controller. The screen splits after about 2 seconds.
+5. **To ride a dinosaur:** aim at it, press **A** to select it, then press **RB + D-pad Up** (keyboard: **T**). **B** (or T) lets go.
+
+### Before you play - important
+- 🎮 **Built for Xbox (XInput) controllers, NOT keyboard and mouse.** Keyboard and mouse still work like the original game, but the
+  mod's features are made for controllers. **Player 2 must use a controller.** PlayStation / Switch pads: use Steam Input.
+- 👥 **Split-screen only turns on when two controllers are connected.** With one controller you play alone.
+- ↩️ To remove the mod, run **`uninstall.bat`**. It restores every game file the installer changed (they are backed up as `*.prejpogmod.bak`).
+- 🐞 Problems? Open an [issue](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/issues) and attach `jpogmod.log` from your game folder.
+
+Full controls for controller and keyboard are below ⬇️
+
+---
+
+## What the mod adds
 
 - **Full Xbox-style controller play**: no mouse needed (built and tested on a ROG Ally docked to a TV).
 - **2-player split-screen co-op**: one shared park and budget. Each player has their own camera, their own build / Manager / Dinosaurs / Actions menus and their own windows.
 - **Ride and fight as any dinosaur**: walk, run, strafe, bite, roar, eat, drink, sleep, pounce, finishing moves.
 - Optional **easy start**: all research and dig sites, parks start at 5 stars, money never runs out.
 
-> **This mod contains NO game files.** You need your own copy of Jurassic Park: Operation Genesis (PC).
-> The installer only adds the mod's own files next to `SimJP.exe` and makes small text edits to your own
-> game data files. Every original it changes is backed up first as `*.prejpogmod.bak`, and `uninstall.bat`
-> puts them all back.
->
 > Not affiliated with or endorsed by Universal, Blue Tongue, Vivendi or anyone who owns Jurassic Park.
 
 ---
