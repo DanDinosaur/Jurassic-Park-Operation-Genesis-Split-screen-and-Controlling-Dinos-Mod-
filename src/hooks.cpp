@@ -14,6 +14,8 @@
 #include "ridehud.h"
 #include "padcursor.h"
 #include "minipad.h"
+#include "widescreen.h"
+#include "extras.h"
 #include <cstdint>
 
 // Detour ARenderer::OnUpdate(float dt) - the per-frame render task (0x477370).
@@ -33,6 +35,8 @@ namespace {
         unsigned f = ++g_frames;
         input_map::GameFrame();          // JPOG33: pad keys are only sent once the game renders
         if (f == 1 || f == 600 || f == 6000) LOG("hooks: frame tick #%u (dt=%.4f self=%p)", f, dt, self);
+        if (f == 60) { widescreen::Install(); extras::Install(); }
+        if (f > 60) extras::Tick(f);         // JPOG67: window (Alt+F4, borderless), cursor speed  // JPOG66: well after the *.asi plugins (proxy loads them on the first DirectInput8Create)
         // Keep the vanilla shoot-from-vehicle cheat bit set (game thread, so no race).
         if (config::Get().vehicleShoot) {
             volatile uint8_t* cheats = reinterpret_cast<volatile uint8_t*>(

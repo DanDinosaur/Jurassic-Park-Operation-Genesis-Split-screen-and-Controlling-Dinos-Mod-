@@ -139,7 +139,13 @@ namespace {
                 const float mn = F<float>(w, 0xA0), mx = F<float>(w, 0xA4), cur = F<float>(w, 0xA8);
                 float st = F<float>(w, 0xAC); if (!(st > 0.0f)) st = 1.0f;
                 float nv = cur + dir * st;
-                const bool cycle = (mx - mn) / st <= 20.0f;          // small pickers wrap round (cycle feel), big sliders stop
+                // JPOG69 (owner 17:20, hatchery species list "only switches between 2 or 3 at the end"): the hatchery's
+                // Category / Species pickers are STEP pickers - the game puts the value back to 0 after every step and
+                // narrows the range at the list ends (start 0..1, middle -1..1, end -1..0). Wrapping one of those turned
+                // "right at the end" into -1 = one step BACK -> ping-pong between the last species. Step pickers (range
+                // inside -1..1 around 0) now stop at the ends like the mouse arrows do; real small pickers still wrap.
+                const bool stepPicker = mn >= -1.001f && mx <= 1.001f && mn <= 0.001f && mx >= -0.001f && fabsf(cur) < 0.001f;
+                const bool cycle = !stepPicker && (mx - mn) / st <= 20.0f;   // small pickers wrap round (cycle feel), big sliders stop
                 if (nv > mx + 0.001f) nv = cycle ? mn : mx;
                 if (nv < mn - 0.001f) nv = cycle ? mx : mn;
                 if (nv == cur) return true;

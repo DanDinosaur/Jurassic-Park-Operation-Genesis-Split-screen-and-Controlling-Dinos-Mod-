@@ -609,6 +609,7 @@ namespace {
     }
 } // namespace
 
+bool g_winFromUnit = false;   // JPOG68: the open window came from A / RB + Up on a unit, not from the disc
 bool IsOpen(int who) { return g_open && g_who == who; }
 bool InOwnWindowCall() { return g_p2Call > 0; }   // JPOG60 (fix C)
 bool WindowOpen(int who) { return g_dlg && g_dlgWho == who; }   // JPOG59
@@ -651,6 +652,7 @@ int OpenUnitWindow(int who, void* unit) {
     if (!ok) { markBad("set-up FAULTED"); return 0; }
     if (!d) { LOG("p2win: player %d - unit %p has no window", who + 1, unit); HintFor(who, L"No info for that one", 2.0f); return 0; }
     const int r = DlgShow(who, d, "unit window");
+    g_winFromUnit = r > 0;   // JPOG68
     LOG("p2win: player %d unit window for %p (dialog %p, proxy %p, attached %d) -> %d", who + 1, unit, d, px, attached, r);
     if (r < 0) { markBad("activate FAULTED"); return 0; }
     return r;
@@ -677,7 +679,10 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
     if (g_dlg && g_dlgWho == who) {                                  // JPOG53: player 2's own window
         if (pad.Pressed(PAD_B) || pad.Pressed(PAD_X)) {
             DlgClose(pad.Pressed(PAD_B) ? "B" : "X");
-            if (pad.Pressed(PAD_B) && g_lastSel) Show(who, g_menu, g_lastSel);   // B = back to the same disc, like the tools
+            // JPOG68 (owner 16:28 "player 2 stuck after a building's window"): back to the disc only when the window was
+            // opened FROM the disc - a building / unit window (A on it) returns to the plain park view.
+            if (pad.Pressed(PAD_B) && g_lastSel && !g_winFromUnit) Show(who, g_menu, g_lastSel);
+            g_winFromUnit = false;
             return true;
         }
         if (config::Get().p2WindowPad && g_dlgCur.root) WindowPad(who, pad, dt);

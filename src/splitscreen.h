@@ -1,6 +1,7 @@
 // splitscreen.h - local 2-player split-screen co-op (layer 1: two live views, P2 camera on pad 2).
 #pragma once
 namespace splitscreen {
+    bool GameAim(float* out);   // JPOG68: the game's aim point (HUD player's centre cursor)
     bool Install();                        // redirect SimJP's TScene::Render import; hook Options toggle
     void Tick(void* renderer, float dt);   // game thread, from the ARenderer::OnUpdate hook
     bool Active();

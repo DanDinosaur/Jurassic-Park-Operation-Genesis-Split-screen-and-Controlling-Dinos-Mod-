@@ -27,7 +27,9 @@ Full controls for controller and keyboard are below ⬇️
 - **Full Xbox-style controller play**: no mouse needed (built and tested on a ROG Ally docked to a TV).
 - **2-player split-screen co-op**: one shared park and budget. Each player has their own camera, their own build / Manager / Dinosaurs / Actions menus and their own windows.
 - **Ride and fight as any dinosaur**: walk, run, strafe, bite, roar, eat, drink, sleep, pounce, finishing moves.
-- Optional **easy start**: all research and dig sites, parks start at 5 stars, money never runs out.
+- **Widescreen** (Hor+) with the HUD pinned to the screen edges, built in.
+- Optional **easy start**: all research and dig sites, every dinosaur species in the hatchery, parks start at 5 stars,
+  money never runs out.
 
 > Not affiliated with or endorsed by Universal, Blue Tongue, Vivendi or anyone who owns Jurassic Park.
 
@@ -56,17 +58,21 @@ original game does, and a few keyboard keys were added for riding dinosaurs. But
 
 1. Download the release zip and unzip it anywhere, for example next to your game folder.
 2. Double-click **`install.bat`**. It finds `SimJP.exe` by itself, or asks you once for the folder.
-   - The first time, it asks **"Easy start?"**: `Y` = all research and dig sites, parks start at 5 stars, money never runs out.
+   - The first time, it asks **"Easy start?"**: `Y` = all research and dig sites, every species in the hatchery, parks start
+     at 5 stars, money never runs out.
      `N` = the normal game. You can change it later in `jpogmod.ini` (`[unlocks]`).
    - You can run it again any time (for example after updating). Your settings are kept, and new settings are added.
 3. Play with **`Launch JPOG.bat`**, or start the game as usual.
 
 **Uninstall:** `uninstall.bat` removes the mod and restores every original file.
 
-### Widescreen / split-screen HUD plugin (optional, see "Known limits")
-The split-screen HUD (each player's menus and HUD drawn in their own half) works together with the
-**JPOG-Modernize** widescreen plugin by Newbie1337x (https://github.com/Newbie1337x/JPOG-Modernize). That plugin has no
-licence, so it is **not included here**. The mod works without it.
+### Widescreen
+The mod has its own widescreen (Hor+ field of view, HUD and menus not stretched, HUD pinned to the screen edges, and
+in split-screen to each player's half), plus a few comfort extras (Alt+F4, borderless window, mouse speed, smooth camera
+at any frame rate). Settings: `[hud]`, `[display]`, `[mouse]`, `[camera]` in `jpogmod.ini`.
+
+If you already use another widescreen plugin (`JPOGMouseFix.asi`), the mod's own widescreen and extras switch themselves
+off while that file is in the game folder. Rename it to `JPOGMouseFix.asi.off` to use the mod's own.
 
 ---
 
@@ -95,7 +101,7 @@ licence, so it is **not included here**. The mod works without it.
 |---|---|---|
 | Left stick / D-pad | move the view; move the highlight in menus | move your own view; menus |
 | Right stick | rotate (left/right) and zoom (up/down) | rotate / zoom your own view |
-| A | select / place / confirm (aim with the middle of your view) | open the building at the middle of your view; pick / place in your menus |
+| A | select / place / confirm (aim with the middle of your view) | select the dinosaur (your camera flies to it) or open the building at the middle of your view; pick / place in your menus |
 | B | back / cancel | back / close |
 | X | Build menu | your Build menu |
 | Y | Manager menu | your Manager menu |
@@ -107,7 +113,7 @@ licence, so it is **not included here**. The mod works without it.
 | Back (tap) | Research | - |
 | Left-stick click | tactical map | - |
 | Right-stick click | switch console style ↔ PC style (stick = mouse cursor, RT = left click, LT = right click) | - |
-| RB + D-pad Up | **take control of the selected dinosaur** | take control of the dinosaur nearest the middle of your view |
+| RB + D-pad Up | **take control of the selected dinosaur** | take control of your selected dinosaur |
 
 **Ring menus (Start, Manager, ...):** push the stick or D-pad toward an option, A = choose.
 
@@ -128,17 +134,19 @@ to confirm.
 2. Press **RB + D-pad Up** (keyboard: **T**). You now control it, and the controls appear on screen.
 3. **B** (keyboard: **T** again) lets go and takes you back to building.
 
-Player 2: aim at a dinosaur and press **RB + D-pad Up**. You take the dinosaur nearest the middle of your view.
+Player 2 does the same with their own controller: aim + **A** selects (player 2's camera flies down to it and follows it
+until you move the stick), then **RB + D-pad Up** takes control.
 
 | Controller | Keyboard (player 1) | Action |
 |---|---|---|
-| Left stick | I / K / J / L | walk forward / walk backwards / strafe left / strafe right |
+| Left stick | I / K / J / L | walk (the dinosaur turns to where the camera looks) / step back / step sideways |
 | Left-stick click | Right Shift | run on / off |
 | Right stick | Numpad 4 / 6 / 8 / 2 (playing alone: Q / E / R / F) | camera |
 | D-pad Up / Down | Numpad + / - | zoom in / out |
 | D-pad Left / Right | - | camera up / down |
-| RT | U | bite / attack |
-| RB | H | finishing move |
+| RT | U | bite / attack (a dinosaur in front of the mouth; bite a fence 5 times to break it) |
+| RB (hold) | H (hold) | turn right on the spot |
+| RB (tap) | H (tap) | finishing move (next to another dinosaur) |
 | LT | O | pounce / special move (Raptor leap, rear-up, ...) |
 | Y | Y | roar (hold = second call) |
 | X | N | eat (big carnivores next to a goat or cow: grab and swallow) |
@@ -173,8 +181,10 @@ Every setting is explained by a comment in the file. Useful ones:
 
 - `[controller]`: `console_mode` (1 = controller style, 0 = PC style), `vibration`, `deadzone`, `window_spinners`
 - `[coop]`: `split_orientation`, `auto_split`, `zoom_out_mult`
-- `[dino]`: `a_takes_control` (1 = A takes control at once instead of RB + D-pad Up), `select_hint`, `attack_range`, `run_mult`, camera options
-- `[unlocks]`: easy start on / off (`all_research`, `all_dig_sites`, `infinite_money`, ...)
+- `[dino]`: `a_takes_control` (1 = A takes control at once instead of RB + D-pad Up), `select_hint`, `attack_range`, `run_mult`,
+  `rb_turn` / `rb_turn_speed`, `fence_break` / `fence_bites`, camera options
+- `[hud]` / `[display]` / `[mouse]` / `[camera]`: widescreen, HUD size in split-screen, Alt+F4, borderless, mouse speed, camera smoothing
+- `[unlocks]`: easy start on / off (`all_research`, `all_dig_sites`, `mr_dna` = every species in the hatchery, `infinite_money`, ...)
 - `[keys]`: the keyboard keys above
 - `[general]`: `log` - the mod writes `jpogmod.log` in the game folder. Include it when you report a bug.
 
@@ -182,8 +192,7 @@ Every setting is explained by a comment in the file. Useful ones:
 
 ## Known limits
 
-- **Without the JPOG-Modernize plugin**, split-screen still works, but the game's HUD and menus are drawn across the
-  whole screen instead of only in the HUD player's half. There is also no Hor+ widescreen.
+- Another widescreen plugin (`JPOGMouseFix.asi`) in the game folder switches the mod's own widescreen off (see "Widescreen").
 - Player 2 has no keyboard or mouse controls.
 - Some game windows exist only once in the game (for example the Start menu and full-screen reports), so only one player
   can have them open at a time.
@@ -196,5 +205,4 @@ code or data is included.
 
 ## Credits
 
-- JPOG-Modernize (widescreen / HUD plugin, not included) - Newbie1337x: https://github.com/Newbie1337x/JPOG-Modernize
 - Jurassic Park: Operation Genesis - Blue Tongue Entertainment / Universal Interactive (2003).

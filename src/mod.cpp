@@ -181,6 +181,20 @@ namespace {
                         input_map::TapKeyName(c.mgr_BACK_TAP);
                     hbPrev = b;
                 }
+                // JPOG68 (owner 16:28): outside a park (main menu, load / options screens, Quit to Windows) BOTH pads drive
+                // the menus - player 2's buttons and sticks are merged into player 1's.
+                bool polled1 = false;
+                if (c.mainMenuBothPads && !splitscreen::CanSwitch() && !gamectl::InPark()) {
+                    pad1.Poll(c.deadzone, c.triggerThreshold);
+                    polled1 = true;
+                    if (pad1.Connected()) {
+                        bool d1[PAD_COUNT];
+                        for (int i = 0; i < PAD_COUNT; ++i) d1[i] = pad1.Down((PadButton)i);
+                        pad0.Merge(d1, pad1.LX(), pad1.LY(), pad1.RX(), pad1.RY(), pad1.LT(), pad1.RT());
+                        static bool s_logged = false;
+                        if (!s_logged) { s_logged = true; LOG("pad: menus outside a park - player 2's pad works too ([controller] main_menu_both_pads)"); }
+                    }
+                }
                 const bool p2Drives = splitscreen::CanSwitch() && splitscreen::ActivePlayer() == 1;
                 if (p2Drives) {
                     if (PlayerMode::Current() == Mode::MANAGER) input_map::DriveManager(pad1, 1);
@@ -215,7 +229,7 @@ namespace {
                         input_map::DriveManager(pad0, 0);
                     // (Player/vehicle modes read the pad through PlayerMode once built.)
                 }
-                if (c.padPlayer2 && !splitscreen::CanSwitch()) pad1.Poll(c.deadzone, c.triggerThreshold);
+                if (c.padPlayer2 && !splitscreen::CanSwitch() && !polled1) pad1.Poll(c.deadzone, c.triggerThreshold);
             }
             Sleep(8); // ~120 Hz poll; smooth for menus, cheap.
         }

@@ -102,6 +102,10 @@ namespace {
         bool     split = false, chaseInit = false, chaseValid = false;
         float    yaw = 0, pitch = 0, camPos[3]{}, zoom = 1.0f;
         float    lookOff = 0;
+        int      stepRel = -10;        // JPOG69 R6: forces the first step-direction log line
+        int      missLogs = 0;         // JPOG69 R7: bite-miss log lines
+        float    rbT = 0;              // JPOG69 R2: RB held time (tap = finisher, hold = turn right)
+        bool     rbTurning = false;
         float    yT = -1.0f;
         bool     runOn = false;  // JPOG56 (owner list 11:51): run = left-stick click toggle, full stick = walk    // JPOG55 (backlog 20): Y held time (tap = call 1, hold = call 2)   // JPOG55 (backlog 13): D-pad Left/Right = camera rig down/up while riding
         float    upSign = -1.0f, fwdSign = 1.0f, r1Sign = -1.0f;   // world up = (0, upSign, 0); matrix row 2 = fwdSign * look dir
@@ -128,6 +132,10 @@ namespace {
         char     step[16]{};                // JPOG59 (open list 7 / B14): strafe / backwards anim playing ("" = none)
         unsigned stepLogs = 0;
         unsigned backLogs = 0;            // JPOG60 (fix B): own log counter for walking backwards
+        // JPOG65: line-up phase (act 13) before a paired kill / raptor latch, like SpecAttk.fsm / RaptHunt.fsm walk in first
+        int      alKind = 0;                // 0 = finishing move, 1 = raptor grapple
+        float    alFrom[3]{}, alTo[3]{}, alT = 0, alDur = 0, alDist0 = 0, alWant = 0;
+        bool     alKill = true, interp = false;
     };
     Slot     g_s[2];
     enum AnimOp : int { A_LOADED, A_PLAY, A_PLAYING, A_STOP, A_STATE_PLAYING, A_STATE_STOP };
@@ -136,6 +144,7 @@ namespace {
     volatile LONG g_reqInfo = -1;   // JPOG55 (backlog 2): RB + D-pad Up = the game's own info bar for the selected unit
     // JPOG34 (owner bug 2): the player WITHOUT the HUD picks a dino near the middle of their own view.
     volatile LONG g_reqPick = -1; float g_pickPt[2][3]{};
+    volatile LONG g_reqSel = -1; float g_selPt[2][3]{};   // JPOG68
     volatile LONG g_ctl[2] = { 0, 0 };   // 1 = that player controls a dino
     void* volatile g_forceVisMI[2] = { nullptr, nullptr };   // JPOG36: model instances kept "visible" (Hook_SetVisible)
     XPad     g_pads[2] = { XPad(0), XPad(1) };
@@ -271,6 +280,7 @@ namespace {
         (void)dt;
     }
 
+    bool TryBreakFence(int p, void* dino, const float* pos, float dirx, float dirz, const char* how);   // JPOG69 R4
     bool Anim(void* unit, const char* name, AnimOp op, bool loop, bool lock);
     void BlendOff(Slot& s, void* unit);
     void BlendOn(Slot& s, void* unit);
@@ -290,7 +300,31 @@ namespace {
     bool Step(Slot& s, int p, void* dino, const float* pos, void* steer, float sx, float sy, float mag,
               float crx, float crz, float cfx, float cfz, float dt) {
         const Config& c = config::Get();
-        const bool back = -sy >= fabsf(sx);
+        bool back = -sy >= fabsf(sx);
+        // JPOG69 R6 (owner 16:54: "turn the camera all the way round with the right stick and left/right are inverted"):
+        // the push still moves the dino along the SCREEN (camera right / forward, same as before), but WHAT the dino does
+        // now depends on its own facing: a push that points the way the dino already faces = a normal forward walk (the
+        // dino no longer back-walks towards the camera when the camera is in front of it), the opposite way = walk
+        // backwards, across = side-step. [dino] step_by_facing = 0 = JPOG61-68 (stick down = back-walk, always).
+        if (c.dinoStepByFacing) {
+            float wx = crx * sx * c.dinoStepInvX + cfx * sy, wz = crz * sx * c.dinoStepInvX + cfz * sy;
+            const float wl = sqrtf(wx * wx + wz * wz);
+            float fx = 0, fz = 0;
+            GUARDED("dino step facing", {
+                fx = *reinterpret_cast<float*>((uint8_t*)steer + 0x70); fz = *reinterpret_cast<float*>((uint8_t*)steer + 0x74); });
+            const float fl = sqrtf(fx * fx + fz * fz);
+            if (wl > 1e-4f && fl > 1e-4f) {
+                wx /= wl; wz /= wl; fx /= fl; fz /= fl;
+                const float along = wx * fx + wz * fz;
+                const float edge = s.step[0] ? 0.08f : 0.0f;
+                if ((s.frames % 120) == 0 || s.stepRel < -5)
+                    LOG("dino: P%d step stick (%.2f %.2f) -> world dir (%.2f %.2f), dino faces (%.2f %.2f), along %.2f, camera right (%.2f %.2f)",
+                        p + 1, sx, sy, wx, wz, fx, fz, along, crx, crz);
+                s.stepRel = 0;
+                if (along > 0.70f + edge) { StepEnd(s, dino); return false; }   // the way it faces: normal walk
+                back = along < -0.70f - edge;
+            }
+        }
         const char* want = "walk_lp";
         if (back && c.dinoBackAll == 0 && !Anim(dino, "walk_bck_lp", A_LOADED, false, false)) {
             if (s.backLogs++ < 2) LOG("dino: P%d no walk_bck_lp for this species - turns round ([dino] back_all = 0)", p + 1);
@@ -313,7 +347,7 @@ namespace {
             if (back) { if (s.backLogs++ < 6) LOG("dino: P%d walks backwards, facing forward (%s)", p + 1, want); }
             else if (s.stepLogs++ < 6) LOG("dino: P%d strafes %s, facing forward (%s)", p + 1, sx > 0 ? "right" : "left", want);
         }
-        float vx = crx * sx + cfx * sy, vz = crz * sx + cfz * sy;
+        float vx = crx * sx * c.dinoStepInvX + cfx * sy, vz = crz * sx * c.dinoStepInvX + cfz * sy;
         const float vl = sqrtf(vx * vx + vz * vz);
         if (vl < 0.0001f) return true;
         vx /= vl; vz /= vl;
@@ -483,6 +517,7 @@ namespace {
         return false;
     }
 
+    float g_lastRange = 6.0f;   // JPOG69 R7: the range FindTarget used last (attack_range or the big-dino range)
     // Nearest other live dino within attack range (null = nobody).
     void* FindTarget(void* dino, const float* pos, float* distSq) {
         void* mgr = *reinterpret_cast<void**>(game::At(kUnitManager));
@@ -501,6 +536,7 @@ namespace {
             reinterpret_cast<fn_prox>(game::At(kProximityCheck))(mgr, nullptr, pos, range,
                 game::At(kDinosaurClass), &NearestCb, &n); });
         if (distSq) *distSq = n.bestDistSq;
+        g_lastRange = range;
         return n.best;
     }
     void HurtTarget(int p, void* dino, void* victim, float distSq) {
@@ -576,10 +612,70 @@ namespace {
         if (void* drv = *reinterpret_cast<void**>((uint8_t*)unit + kUnitDrive))
             *reinterpret_cast<float*>((uint8_t*)drv + 0xC) = -1000.0f;
     }
+    // ---- JPOG65: paired-kill alignment (owner 13:58: "bites the neck ~10 ft away") ----
+    // Vanilla (GenFSM\SpecAttk.fsm / SpnoTrty.fsm): both units walk until the horizontal centre-to-centre distance is
+    // inside [param7 - 0.5, param7) (WithinTargetDistanceParam 0x4B3770), FaceTarget each other, then both anims start
+    // in the SAME frame with SetInterpolation(true) + SetAvoidanceSteer(false); the winner ends with
+    // SetTransfromFromLocator("D", true). param7 ("req distance") / param8 ("actual perfect distance") come from the
+    // dinosaur classes' SetFatalityAnims in Units.dll (vftable slot 0x26C; the SimJP AActiveUnit one is an empty stub):
+    //   T-rex <-> Spino (Sp / Tx)   13.8 / 14.376      Tricera (Tr)  11.0 / 11.65
+    //   Steg (St)                   11.0 / 11.65       Anky (An, plain attk01/dth01)  11.0 / 11.5
+    constexpr uintptr_t kActSetInterpolation = 0x004B19C0, kActSetAvoidance = 0x004ACEB0;
+    constexpr uintptr_t kSteerSetFacing = 0x00498A40;      // ACreatureSteer::SetFacingDir(TVector3&) (vfn +0x84, ret 4)
+    constexpr uintptr_t kSteerRadius    = 0x0063DFA0;      // ACreatureSteer::Imp_GetCollisionRadius() (vfn +0xF8)
+    float SteerRadius(void* unit) {
+        float r = 0.0f; void* st = Steering(unit);
+        if (st) GUARDED("steer radius", { r = reinterpret_cast<float(__fastcall*)(void*, void*)>(game::At(kSteerRadius))(st, nullptr); });
+        return (r > 0.05f && r < 40.0f) ? r : 2.0f;
+    }
+    void FaceDirInstant(void* unit, float dx, float dz) {
+        void* st = Steering(unit);
+        const float l = sqrtf(dx * dx + dz * dz);
+        if (!st || l < 0.001f) return;
+        float dir[3] = { dx / l, 0.0f, dz / l };
+        GUARDED("dino face instant", { reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kSteerSetFacing))(st, nullptr, dir); });
+    }
+    bool PlaceAt(void* unit, const float* p) {
+        void* st = Steering(unit);
+        if (!st) return false;
+        float np[3] = { p[0], p[1], p[2] };
+        return GUARDED("dino place", { reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kSteerSetPos))(st, nullptr, np); });
+    }
+    // Vanilla distance for a pair (both anim names); req = param 7, perf = param 8.
+    void FinisherDistance(const char* aa, const char* va, float* req, float* perf) {
+        auto has = [&](const char* code) {
+            char a[24];
+            snprintf(a, sizeof a, "lcarn_%s", code);
+            return _strnicmp(aa, a, strlen(a)) == 0 || _strnicmp(va, a, strlen(a)) == 0;
+        };
+        if (has("Sp") || has("Tx"))      { *req = 13.8f; *perf = 14.376f; }
+        else if (has("Tr") || has("St")) { *req = 11.0f; *perf = 11.65f; }
+        else                             { *req = 11.0f; *perf = 11.5f; }   // Anky (An / plain attk01 dth01)
+    }
+    void KillInterp(void* unit, bool on, const char* who) {
+        if (!unit || !config::Get().dinoFinisherInterp) return;
+        // JPOG69 (crash 16:57:17, SimJP+0xBF079): interpolation mode 6 makes AActiveUnit::Imp_GetSteeringEffect read
+        // [[unit+0xA8]+0x34]+0x40 every frame (the unit's fatality entry, set up by the game's own fatal-attack path).
+        // A Triceratops that was never set up there had a null entry -> access violation in the next steering tick.
+        // Only switch interpolation ON for a unit whose entry exists (OFF is always safe).
+        if (on) {
+            void* e = nullptr;
+            GUARDED("finisher: interpolation entry check", {
+                void* a8 = *reinterpret_cast<void**>((uint8_t*)unit + 0xA8);
+                if (a8) e = *reinterpret_cast<void**>((uint8_t*)a8 + 0x34); });
+            if (!e) {
+                LOG("dino: finisher %s %p has no fatality entry ([+0xA8]+0x34 = 0) - interpolation skipped (JPOG69 crash fix)", who, unit);
+                return;
+            }
+        }
+        Act(unit, kActSetInterpolation, on ? "finisher: interpolation on" : "finisher: interpolation off", "b", nullptr, nullptr, on ? 1 : 0);
+        Act(unit, kActSetAvoidance, on ? "finisher: avoidance off" : "finisher: avoidance on", "b", nullptr, nullptr, on ? 0 : 1);
+        (void)who;
+    }
     const char* ActName(int a) {
         static const char* n[] = { "none", "roar", "eat", "sleep(lie down)", "sleep", "end", "finishing move", "bite", "sleep(rest -> sleep)",
-                                   "swallow", "grab + swallow", "raptor grapple", "drink" };
-        return (a >= 0 && a <= 12) ? n[a] : "?";
+                                   "swallow", "grab + swallow", "raptor grapple", "drink", "lining up" };
+        return (a >= 0 && a <= 13) ? n[a] : "?";
     }
 
     void DropVictim(Slot& s, bool aiBack) {
@@ -589,6 +685,30 @@ namespace {
                     reinterpret_cast<fn_this0>(game::At(kDriveForceRefresh))(drv, nullptr); });
         if (s.vicProxy && --*reinterpret_cast<int*>((uint8_t*)s.vicProxy + 4) == 0) Release(s.vicProxy);
         s.vic = nullptr; s.vicProxy = nullptr; s.vicAnim[0] = 0;
+    }
+    // JPOG68 (owner 16:28): each player's OWN dinosaur selection (A), taken with RB + D-pad Up. The game has ONE selection
+    // (the HUD player's) and its pick under the centre cursor often missed; player 2 had no selection at all. Kept with a
+    // proxy reference (proxy +0x14 = the unit while it lives), like the finisher victim.
+    void* g_selU[2] = { nullptr, nullptr }; void* g_selP[2] = { nullptr, nullptr };
+    unsigned g_selSerial[2] = { 0, 0 };
+    void DropSel(int p) {
+        if (g_selP[p] && --*reinterpret_cast<int*>((uint8_t*)g_selP[p] + 4) == 0) Release(g_selP[p]);
+        g_selU[p] = g_selP[p] = nullptr;
+    }
+    void* SelOf(int p) {
+        void* u = g_selU[p];
+        if (!u) return nullptr;
+        if (*reinterpret_cast<void**>((uint8_t*)g_selP[p] + 0x14) != u || Gone(u) || Dead(u)) { DropSel(p); return nullptr; }
+        return u;
+    }
+    void SetSel(int p, void* u) {
+        if (g_selU[p] == u) return;
+        DropSel(p);
+        void* pr = u ? *reinterpret_cast<void**>((uint8_t*)u + kUnitProxy) : nullptr;
+        if (!pr) return;
+        ++*reinterpret_cast<int*>((uint8_t*)pr + 4);
+        g_selU[p] = u; g_selP[p] = pr;
+        ++g_selSerial[p];   // JPOG69 R1: a new selection -> that player's camera flies to it (splitscreen)
     }
     void GrabCleanup(Slot& s, void* dino, bool destroyed);
     void GrappleCleanup(Slot& s, void* dino);
@@ -601,7 +721,12 @@ namespace {
         if (s.act == 7 && s.locatorFix && dino) EndBiteAnim(s, dino);   // JPOG44: before the stop (pose still at the end)
         if (dino && s.anim[0]) Anim(dino, s.anim, A_STOP, false, false);
         if (dino && (s.act == 3 || s.act == 4 || s.act == 8)) { Anim(dino, "sleep_lp", A_STATE_STOP, false, false); Anim(dino, "rest_lp", A_STATE_STOP, false, false); }
-        if (s.act == 6) DropVictim(s, true);
+        if (s.act == 6 || s.act == 13) {
+            if (s.interp) { KillInterp(dino, false, "attacker"); if (s.vic && !Gone(s.vic)) KillInterp(s.vic, false, "victim"); s.interp = false; }
+            if (s.act == 6) s.locatorFix = false;
+            if (s.act == 13 && s.alKind == 1 && dino) SetTarget(dino, nullptr);
+            DropVictim(s, true);
+        }
         if (s.act == 10) GrabCleanup(s, dino, false);
         if (s.act == 11) GrappleCleanup(s, dino);
         LOG("dino: P%d action %s stopped (%s)", p + 1, ActName(s.act), why);
@@ -683,6 +808,8 @@ namespace {
         return false;
     }
     bool TryGrapple(int p, void* dino, const float* pos, void* victim, bool kill = true);
+    bool TryGrappleNow(int p, void* dino, const float* pos, void* victim, bool kill);
+    void StartFinisherAnims(int p, void* dino, void* victim, float d);
     bool TryFinisher(int p, void* dino, const float* pos, void* victim, bool forced) {
         Slot& s = g_s[p];
         const Config& c = config::Get();
@@ -707,14 +834,87 @@ namespace {
         FreezeAI(victim);
         StopMotion(dino); StopMotion(victim);
         BlendOff(s, dino);
+        strncpy(s.anim, aa, sizeof s.anim - 1); s.anim[sizeof s.anim - 1] = 0;
+        strncpy(s.vicAnim, va, sizeof s.vicAnim - 1); s.vicAnim[sizeof s.vicAnim - 1] = 0;
+        const float dx = pos[0] - vpos[0], dz = pos[2] - vpos[2], d = sqrtf(dx * dx + dz * dz);
+        if (c.dinoFinisherAlign > 0) {
+            float req = 0, perf = 0;
+            FinisherDistance(aa, va, &req, &perf);
+            float want = (c.dinoFinisherAlign == 2 ? req - 0.25f : perf) + c.dinoFinisherDistAdd;
+            if (want < 1.0f) want = 1.0f;
+            // attacker moves along the line it came from (vanilla: SeekTarget / StepBackFromTarget on that line)
+            float nx = 0.0f, nz = 1.0f;
+            if (d > 0.01f) { nx = dx / d; nz = dz / d; }
+            s.alKind = 0; s.alKill = true;
+            s.alFrom[0] = pos[0]; s.alFrom[1] = pos[1]; s.alFrom[2] = pos[2];
+            s.alTo[0] = vpos[0] + nx * want; s.alTo[1] = pos[1]; s.alTo[2] = vpos[2] + nz * want;
+            const float move = fabsf(d - want);
+            s.alDur = move < 0.05f ? 0.0f : (move / 8.0f < 0.12f ? 0.12f : (move / 8.0f > 0.6f ? 0.6f : move / 8.0f));
+            s.alT = 0; s.alDist0 = d; s.alWant = want;
+            s.act = 13; s.actT = 3.0f; s.actAge = 0;
+            FaceDirInstant(dino, -nx, -nz); FaceDirInstant(victim, nx, nz);
+            LOG("dino: P%d finisher align: '%s' + victim '%s' - distance %.2f m, vanilla req %.2f perfect %.3f -> %.2f m (slide %.2f s, mode %d)",
+                p + 1, aa, va, d, req, perf, want, s.alDur, c.dinoFinisherAlign);
+            padrumble::Pulse(p, 0.6f, 0.2f);
+            return true;
+        }
         FaceTo(dino, pos, vpos); FaceTo(victim, vpos, pos);
-        bool ok1 = Anim(dino, aa, A_PLAY, false, false);
-        bool ok2 = Anim(victim, va, A_PLAY, false, true);
+        StartFinisherAnims(p, dino, victim, d);
+        return true;
+    }
+    // Both anims in the same frame (SpecAttk.fsm StartFatalAttack / StartFatalDeath).
+    void StartFinisherAnims(int p, void* dino, void* victim, float d) {
+        Slot& s = g_s[p];
+        const bool align = config::Get().dinoFinisherAlign > 0;
+        if (align) { KillInterp(dino, true, "attacker"); KillInterp(victim, true, "victim"); s.interp = config::Get().dinoFinisherInterp; }
+        bool ok1 = Anim(dino, s.anim, A_PLAY, false, false);
+        bool ok2 = Anim(victim, s.vicAnim, A_PLAY, false, true);
         s.act = 6; s.actT = 12.0f; s.actAge = 0;
-        strncpy(s.anim, aa, sizeof s.anim - 1); strncpy(s.vicAnim, va, sizeof s.vicAnim - 1);
-        LOG("dino: P%d FINISHING MOVE on %p (health %.1f, dist %.1f): '%s' + victim '%s' ok=%d/%d",
-            p + 1, victim, h, sqrtf((vpos[0]-pos[0])*(vpos[0]-pos[0]) + (vpos[2]-pos[2])*(vpos[2]-pos[2])), aa, va, ok1, ok2);
+        s.locatorFix = align;
+        LOG("dino: P%d FINISHING MOVE on %p (health %.1f, dist %.2f): '%s' + victim '%s' ok=%d/%d",
+            p + 1, victim, Health(victim), d, s.anim, s.vicAnim, ok1, ok2);
         padrumble::Pulse(p, 1.0f, 0.5f);
+    }
+    // act 13: slide the attacker to the vanilla distance, both facing each other, then start the paired anims / latch.
+    bool TickAlign(int p, void* dino, float dt) {
+        Slot& s = g_s[p];
+        void* v = s.vic;
+        const bool vok = v && s.vicProxy && *reinterpret_cast<void**>((uint8_t*)s.vicProxy + 0x14) == v && !Gone(v) && !Dead(v);
+        if (!vok) {
+            LOG("dino: P%d %s line-up - victim gone", p + 1, s.alKind ? "pounce" : "finisher");
+            if (s.alKind == 1) { SetTarget(dino, nullptr); s.targetSet = false; }
+            DropVictim(s, true); s.act = 0; s.anim[0] = 0; BlendOn(s, dino);
+            return false;
+        }
+        FreezeAI(v); StopMotion(v); StopMotion(dino);
+        s.alT += dt;
+        const float t = s.alDur > 0.0f ? (s.alT / s.alDur > 1.0f ? 1.0f : s.alT / s.alDur) : 1.0f;
+        const float k = t * t * (3.0f - 2.0f * t);   // smoothstep
+        float cur[3];
+        if (!DinoPos(dino, cur)) cur[1] = s.alFrom[1];
+        float np[3] = { s.alFrom[0] + (s.alTo[0] - s.alFrom[0]) * k, cur[1], s.alFrom[2] + (s.alTo[2] - s.alFrom[2]) * k };
+        PlaceAt(dino, np);
+        float vpos[3];
+        if (DinoPos(v, vpos)) { FaceDirInstant(dino, vpos[0] - np[0], vpos[2] - np[2]); FaceDirInstant(v, np[0] - vpos[0], np[2] - vpos[2]); }
+        if (t < 1.0f && s.actT > 0) return true;
+        float a[3], b[3], d = -1.0f;
+        if (DinoPos(dino, a) && DinoPos(v, b)) d = sqrtf((a[0] - b[0]) * (a[0] - b[0]) + (a[2] - b[2]) * (a[2] - b[2]));
+        if (s.alKind == 0) {
+            LOG("dino: P%d finisher align done: distance %.2f -> %.2f m (wanted %.2f)", p + 1, s.alDist0, d, s.alWant);
+            StartFinisherAnims(p, dino, v, d);
+            return true;
+        }
+        // raptor: the vanilla latch (RaptHunt.fsm LatchCheck) at the right gap; the victim ref moves to TryGrapple's own
+        void* victim = v;
+        DropVictim(s, false);
+        LOG("dino: P%d pounce align done: centre distance %.2f -> %.2f m (gap wanted %.2f)", p + 1, s.alDist0, d, config::Get().dinoPounceGap);
+        s.act = 0;
+        float pos[3]; DinoPos(dino, pos);
+        if (!TryGrappleNow(p, dino, pos, victim, s.alKill)) {
+            BlendOn(s, dino);
+            LOG("dino: P%d pounce - latch refused after the line-up", p + 1);
+            return false;
+        }
         return true;
     }
 
@@ -741,12 +941,101 @@ namespace {
         }
         if (s.anim[0]) Anim(dino, s.anim, A_STOP, false, false);
     }
+    // JPOG69 R4 (owner 16:47): a PLAYER's dino breaks fences easily (AI dinos keep the vanilla rules). The game's own FSM
+    // actions, as a library (the fence-break scripts): target = the fence's wall unit (what AActiveUnit::AcquireFence
+    // does, without its "dino strength >= fence class" refusal), DamageFence 0x4B75E0 (amount, sparks, use-size = 0)
+    // with a huge amount -> the section's health hits 0 and its "intact" flag 0x100 clears, then RamFence 0x4B6240
+    // (false) = the vanilla break: sound, "fence broken" popup, particles, park events, AWallManager::BreakWallSection.
+    // Closest intact section: AWallManager::GetClosestWall 0x5E4B60 (pos, radius, intact only, false) on
+    // AParkManager::m_pWallManager 0x8500A8; node +0x0C / +0x14 = x / z; AWallUnitNode::GetWallUnit 0x5E2990 (fastcall).
+    // Triggered by bites (RT) that hit no dino: [dino] fence_bites (5) bites on the same section break it (owner 17:09: never
+    // by walking into it).
+    DWORD g_fenceT[2] = { 0, 0 }; int s_fenceFarLogs = 0; unsigned s_fenceBreaks = 0;
+    void* g_fenceNode[2] = { nullptr, nullptr }; int g_fenceBites[2] = { 0, 0 }; DWORD g_fenceBiteT[2] = { 0, 0 };
+    bool TryBreakFence(int p, void* dino, const float* pos, float dirx, float dirz, const char* how) {
+        const Config& c = config::Get();
+        if (!c.dinoFenceBreak || !dino) return false;
+        const DWORD now = GetTickCount();
+        if (now - g_fenceT[p] < 700) return false;
+        void* wm = *reinterpret_cast<void**>(game::At(0x008500A8));
+        if (!wm) return false;
+        float rad = 0.0f;
+        GUARDED("fence: own radius", { rad = reinterpret_cast<float(__fastcall*)(void*, void*, int)>((*reinterpret_cast<void***>(dino))[0xB8 / 4])(dino, nullptr, 9); });
+        if (!(rad > 0.0f && rad < 40.0f)) rad = 3.0f;
+        const float reach = rad + c.dinoFenceReach;
+        void* node = nullptr;
+        GUARDED("fence: closest wall", {
+            node = reinterpret_cast<void*(__fastcall*)(void*, void*, const float*, int, int, int)>(game::At(0x005E4B60))(wm, nullptr, pos, (int)(reach + 1.0f), 1, 0); });
+        if (!node) return false;
+        float wx = 0, wz = 0;
+        GUARDED("fence: wall position", { wx = *reinterpret_cast<float*>((uint8_t*)node + 0x0C); wz = *reinterpret_cast<float*>((uint8_t*)node + 0x14); });
+        const float dx = wx - pos[0], dz = wz - pos[2], d = sqrtf(dx * dx + dz * dz);
+        const float dl = sqrtf(dirx * dirx + dirz * dirz);
+        const float cosA = (d > 0.01f && dl > 1e-4f) ? (dx * dirx + dz * dirz) / (d * dl) : 1.0f;
+        if (d > reach || (cosA < 0.2f && d > rad * 0.7f)) {
+            if (s_fenceFarLogs++ < 4) LOG("dino: P%d fence section at %.1f m (reach %.1f, angle cos %.2f) - not in front, left alone", p + 1, d, reach, cosA);
+            return false;
+        }
+        void* wu = nullptr;
+        GUARDED("fence: wall unit", { wu = reinterpret_cast<void*(__fastcall*)(void*)>(game::At(0x005E2990))(node); });
+        if (!wu || !*reinterpret_cast<void**>((uint8_t*)wu + kUnitProxy)) { LOG("dino: P%d fence section %p has no wall unit - can't break it", p + 1, node); return false; }
+        // Owner 17:09: NOT by walking into it - only after ~5 bites on the same fence ([dino] fence_bites). Each bite counts
+        // one (sparks + rumble, hint "Fence: 3 / 5"); a different section or > 20 s between bites starts again.
+        if (g_fenceNode[p] != node || now - g_fenceBiteT[p] > 20000) { g_fenceNode[p] = node; g_fenceBites[p] = 0; }
+        g_fenceBiteT[p] = now;
+        const int need = c.dinoFenceBites < 1 ? 1 : c.dinoFenceBites;
+        if (++g_fenceBites[p] < need) {
+            LOG("dino: P%d bites the fence (%d / %d) - section %p at %.1f m", p + 1, g_fenceBites[p], need, node, d);
+            wchar_t h[64]; swprintf(h, 64, L"Fence: %d / %d bites", g_fenceBites[p], need);
+            gamectl::RequestHint(h, 1.5f); splitscreen::HintToHalf(p, 1.5f);
+            padrumble::Pulse(p, 0.5f, 0.15f);
+            return true;
+        }
+        g_fenceBites[p] = 0; g_fenceNode[p] = nullptr;
+        g_fenceT[p] = now;
+        SetTarget(dino, wu);
+        const bool dmg = Act(dino, 0x004B75E0, "fence: DamageFence", "fb", nullptr, nullptr, 1, 1000000.0f);
+        const bool ram = Act(dino, 0x004B6240, "fence: RamFence", "b", nullptr, nullptr, 0);
+        SetTarget(dino, nullptr);
+        s_fenceBreaks++;
+        LOG("dino: P%d BREAKS the fence (%s) - section %p at %.1f m, wall unit %p: DamageFence ok=%d, RamFence ok=%d (%u so far)",
+            p + 1, how, node, d, wu, dmg, ram, s_fenceBreaks);
+        padrumble::Pulse(p, 0.8f, 0.3f);
+        return true;
+    }
     void StartBite(int p, void* dino, const float* pos) {
         Slot& s = g_s[p];
         const Config& c = config::Get();
         float d2 = 0;
         void* victim = FindTarget(dino, pos, &d2);
+        // JPOG69 R7 (owner 16:55: "still blood when they bite the air"): the proximity check counts a dino whose BODY
+        // reaches into the range (T-rex "attacks" a Brachiosaurus 32 m away, centre to centre) - the game then plays the
+        // bite's blood although the mouth hits nothing. [dino] bite_front_only: a bite only hits a dino in FRONT of the
+        // attacker (inside +-70 deg of its facing) whose centre is within the attack range + its own radius.
+        if (victim && c.dinoBiteFrontOnly) {
+            float vp[3], fx = 0, fz = 0, vr = 0;
+            void* st = *reinterpret_cast<void**>((uint8_t*)dino + kUnitSteer);
+            bool ok = DinoPos(victim, vp) && st;
+            if (ok) GUARDED("bite facing", {
+                fx = *reinterpret_cast<float*>((uint8_t*)st + 0x70); fz = *reinterpret_cast<float*>((uint8_t*)st + 0x74);
+                vr = reinterpret_cast<float(__fastcall*)(void*, void*, int)>((*reinterpret_cast<void***>(victim))[0xB8 / 4])(victim, nullptr, 9); });
+            if (!(vr > 0.0f && vr < 60.0f)) vr = 0.0f;
+            const float dx = vp[0] - pos[0], dz = vp[2] - pos[2], d = sqrtf(dx * dx + dz * dz), fl = sqrtf(fx * fx + fz * fz);
+            const float cosA = (d > 0.01f && fl > 1e-4f) ? (dx * fx + dz * fz) / (d * fl) : 1.0f;
+            const float reach = g_lastRange + (vr < 4.0f ? vr : 4.0f);
+            if (!ok || cosA < 0.34f || d > reach) {
+                if (s.missLogs++ < 6) LOG("dino: P%d bite - %p at %.1f m (reach %.1f, angle cos %.2f) is not in front of the mouth: a miss, no blood, no damage",
+                                          p + 1, victim, d, reach, cosA);
+                victim = nullptr;
+            }
+        }
         s.biteHit = victim != nullptr;
+        if (!victim) {   // JPOG69 R4: a bite at a fence breaks it
+            void* st = *reinterpret_cast<void**>((uint8_t*)dino + kUnitSteer);
+            float fx = 0, fz = 0;
+            if (st) GUARDED("fence bite facing", { fx = *reinterpret_cast<float*>((uint8_t*)st + 0x70); fz = *reinterpret_cast<float*>((uint8_t*)st + 0x74); });
+            TryBreakFence(p, dino, pos, fx, fz, "bite");
+        }
         if (victim && c.dinoActions && TryFinisher(p, dino, pos, victim)) return;
         if (c.dinoActions && TryGrab(p, dino, pos)) return;
         char bite[24]{};
@@ -921,7 +1210,41 @@ namespace {
         s.latched = false; s.targetSet = false;
         DropVictim(s, true);
     }
+    // JPOG65: vanilla only latches when the gap (centre distance - both collision radii, InTargetProximityRadius
+    // 0x4B39E0) is <= 3.5 m (RaptHunt.fsm). Further away: line up first (act 13), then latch.
     bool TryGrapple(int p, void* dino, const float* pos, void* victim, bool kill) {
+        Slot& s = g_s[p];
+        const Config& c = config::Get();
+        float vpos[3];
+        if (c.dinoFinisherAlign > 0 && DinoPos(victim, vpos)) {
+            const float dx = pos[0] - vpos[0], dz = pos[2] - vpos[2], d = sqrtf(dx * dx + dz * dz);
+            const float rr = SteerRadius(dino) + SteerRadius(victim);
+            const float gap = d - rr;
+            if (gap > c.dinoPounceGap + 0.25f) {
+                void* vp = *reinterpret_cast<void**>((uint8_t*)victim + kUnitProxy);
+                if (!vp) return false;
+                ++*reinterpret_cast<int*>((uint8_t*)vp + 4);
+                s.vic = victim; s.vicProxy = vp;
+                FreezeAI(victim); StopMotion(dino); StopMotion(victim); BlendOff(s, dino);
+                float nx = 0.0f, nz = 1.0f;
+                if (d > 0.01f) { nx = dx / d; nz = dz / d; }
+                const float want = rr + c.dinoPounceGap;
+                s.alKind = 1; s.alKill = kill;
+                s.alFrom[0] = pos[0]; s.alFrom[1] = pos[1]; s.alFrom[2] = pos[2];
+                s.alTo[0] = vpos[0] + nx * want; s.alTo[1] = pos[1]; s.alTo[2] = vpos[2] + nz * want;
+                const float move = d - want;
+                s.alDur = move / 10.0f < 0.12f ? 0.12f : (move / 10.0f > 0.6f ? 0.6f : move / 10.0f);
+                s.alT = 0; s.alDist0 = d; s.alWant = want;
+                s.anim[0] = 0; s.act = 13; s.actT = 3.0f; s.actAge = 0;
+                LOG("dino: P%d pounce align: centre distance %.2f m, radii %.2f, gap %.2f > %.2f -> moving to %.2f m (slide %.2f s)",
+                    p + 1, d, rr, gap, c.dinoPounceGap, want, s.alDur);
+                return true;
+            }
+            LOG("dino: P%d pounce: gap %.2f m (centre %.2f, radii %.2f) - close enough, latch now", p + 1, gap, d, rr);
+        }
+        return TryGrappleNow(p, dino, pos, victim, kill);
+    }
+    bool TryGrappleNow(int p, void* dino, const float* pos, void* victim, bool kill) {
         Slot& s = g_s[p];
         s.grappleKill = kill;
         void* vp = *reinterpret_cast<void**>((uint8_t*)victim + kUnitProxy);
@@ -1111,7 +1434,39 @@ namespace {
         const bool canAct = s.act == 0 || s.act == 1 || s.act == 2;
         const bool lt = pad.LT() > 0.5f, ltPress = lt && !s.prevLT;
         s.prevLT = lt;
-        if (c.dinoActions && canAct && pad.Pressed(PAD_RB)) {
+        // JPOG69 R2 (owner 16:47 + answer 16:5x: "RB turns right, LB stays sleep"): RB HELD = the dino turns right on the
+        // spot (every species, both players; [dino] rb_turn_speed deg/s, rb_turn_invert test switch). RB TAPPED (released
+        // within rb_tap_time) = the finishing move as before, now on release. [dino] rb_turn = 0 = JPOG68 (RB press = finisher).
+        bool rbFinish = false;
+        if (c.dinoRbTurn) {
+            if (pad.Pressed(PAD_RB)) { s.rbT = 0.0f; s.rbTurning = false; }
+            if (pad.Down(PAD_RB)) {
+                s.rbT += dt;
+                if (s.rbT >= c.dinoRbTapTime && canAct && !stick) {
+                    void* st = Steering(dino);
+                    float fx = 0, fz = 0;
+                    if (st) GUARDED("rb turn facing", {
+                        fx = *reinterpret_cast<float*>((uint8_t*)st + 0x70); fz = *reinterpret_cast<float*>((uint8_t*)st + 0x74); });
+                    const float fl = sqrtf(fx * fx + fz * fz);
+                    if (fl > 1e-4f) {
+                        fx /= fl; fz /= fl;
+                        // the dino's right = (fz, -fx): the game camera's row 0 (screen right) for a camera looking along the facing
+                        const float a = c.dinoRbTurnSpeed * 3.14159265f / 180.0f * dt * c.dinoRbTurnSign;
+                        const float ca = cosf(a), sa = sinf(a);
+                        StopMotion(dino);
+                        FaceDirInstant(dino, ca * fx + sa * fz, ca * fz - sa * fx);
+                        s.holdValid = false;
+                        if (!s.rbTurning) { s.rbTurning = true; LOG("dino: P%d RB held - turning right (%.0f deg/s)", p + 1, c.dinoRbTurnSpeed); }
+                    }
+                }
+            }
+            if (pad.Released(PAD_RB)) {
+                if (s.rbT < c.dinoRbTapTime) rbFinish = true;
+                else if (s.rbTurning) LOG("dino: P%d RB released - turn done (%.1f s)", p + 1, s.rbT);
+                s.rbTurning = false;
+            }
+        } else rbFinish = pad.Pressed(PAD_RB);
+        if (c.dinoActions && canAct && rbFinish) {
             float d2 = 0; void* v = FindTarget(dino, pos, &d2);
             if (!v) LOG("dino: P%d RB finishing move - nobody in range", p + 1);
             else {
@@ -1207,7 +1562,7 @@ namespace {
         }
         if (!s.act) return false;
         s.actAge += dt; s.actT -= dt;
-        const bool playing = s.actAge < 0.3f || Anim(dino, s.anim, A_PLAYING, false, false);
+        const bool playing = s.actAge < 0.3f || (s.anim[0] && Anim(dino, s.anim, A_PLAYING, false, false));
         switch (s.act) {
         case 1:   // roar: stand until it ends
             if (!playing || s.actT <= 0) { LOG("dino: P%d roar done", p + 1); s.act = 0; s.anim[0] = 0; BlendOn(s, dino); return false; }
@@ -1235,6 +1590,7 @@ namespace {
             return true;
         case 10: return TickGrab(p, dino, dt);
         case 11: return TickGrapple(p, dino, dt);
+        case 13: return TickAlign(p, dino, dt);
         case 3: {  // lying down (st)
             if (stick) { EndAction(p, dino, "moved"); return true; }
             const bool rest = strcmp(s.fam, "rest") == 0;
@@ -1301,6 +1657,19 @@ namespace {
             if (!vok) { LOG("dino: P%d finishing move - victim gone", p + 1); StopAction(p, dino, "victim gone"); return false; }
             FreezeAI(v);
             if (!playing || s.actT <= 0) {
+                // JPOG65: SpecAttk.fsm FatalPosture - interpolation off, avoidance back on, winner to locator "D"
+                // (root motion kept, no snap back), then stop the anim.
+                if (s.interp) { KillInterp(dino, false, "attacker"); KillInterp(v, false, "victim"); s.interp = false; }
+                if (s.locatorFix) {
+                    float b4[3]{}, af[3]{};
+                    DinoPos(dino, b4);
+                    bool moved = Act(dino, kActSetTransformFromLocator, "finisher: transform from locator D", "sb", "D", nullptr, 1);
+                    DinoPos(dino, af);
+                    LOG("dino: P%d finisher end - moved to locator D ok=%d (%.2f m)", p + 1, moved,
+                        sqrtf((af[0] - b4[0]) * (af[0] - b4[0]) + (af[2] - b4[2]) * (af[2] - b4[2])));
+                    s.locatorFix = false;
+                    if (s.anim[0]) Anim(dino, s.anim, A_STOP, false, false);
+                }
                 float before = Health(v);
                 bool ok = GUARDED("finishing blow", {
                     reinterpret_cast<fn_hurt>(game::At(kHurtUnit))(v, nullptr, before + 100.0f, 3, dino); });
@@ -1319,9 +1688,9 @@ namespace {
 
     // JPOG34 (owner bug 3): the game's hint is drawn in the HUD = the builder's half. In split-screen the hint is
     // moved into the rider's own half while it shows (splitscreen::HintToHalf).
-    const wchar_t* kSplitControls = L"Dino: LS move (click = run), RS camera, D-pad zoom, RT bite, RB finishing move, LT pounce / special move, Y roar (hold = 2nd call), X eat, A drink (at water), LB sleep, B let go";
+    const wchar_t* kSplitControls = L"Dino: LS move (click = run), RS camera, D-pad zoom, RT bite, RB hold = turn right (tap = finishing move), LT pounce / special move, Y roar (hold = 2nd call), X eat, A drink (at water), LB sleep, B let go";
     // JPOG63: PC-cursor style wording (riding itself is controller-only; no keyboard keys for it).
-    const wchar_t* kPcControls = L"Riding (keyboard): I J K L move, Right Shift run, U bite, H finishing move, O pounce / special, Y roar (hold = 2nd call), N eat, G drink, Z sleep, Numpad 4 6 8 2 camera (one player: Q E R F), Numpad + - zoom, T let go";
+    const wchar_t* kPcControls = L"Riding (keyboard): I J K L move, Right Shift run, U bite, H hold = turn right (tap = finishing move), O pounce / special, Y roar (hold = 2nd call), N eat, G drink, Z sleep, Numpad 4 6 8 2 camera (one player: Q E R F), Numpad + - zoom, T let go";
     const wchar_t* ControlsText() { return input_map::ConsoleActive() ? kSplitControls : kPcControls; }
     void ShowControls(int p) {
         const float secs = config::Get().riderHintSecs;
@@ -1337,7 +1706,11 @@ namespace {
         // Split-screen (JPOG30): no follow state - the other player keeps the HUD and builds.
         const bool split = splitscreen::CanSwitch();
         if (!split && (g_ctl[0] || g_ctl[1])) { LOG("dino: player %d asked for control - one dino at a time without split-screen", p + 1); return; }
-        void* unit = forced ? forced : gamectl::SelectedUnit();
+        // JPOG68: this player's own selection (A). The HUD player: the game's selection when it is a dino, else ours.
+        const int hudP = split ? splitscreen::ActivePlayer() : 0;
+        void* unit = forced;
+        if (!unit && p == hudP) { void* g = gamectl::SelectedUnit(); if (g && gamectl::IsA(g, kDinosaurClass)) unit = g; }
+        if (!unit) unit = SelOf(p);
         if (!unit || !gamectl::IsA(unit, kDinosaurClass)) {
             LOG("dino: player %d asked for control - no dinosaur selected (unit %p)", p + 1, unit);
             gamectl::RequestHint(L"Select a dinosaur first: aim at it and press A, then RB + D-pad Up", 4.0f);
@@ -1353,7 +1726,8 @@ namespace {
             gamectl::RequestHint(L"That dinosaur can't be controlled", 3.0f);
             return;
         }
-        if (!gamectl::IsDefaultState(st) && !gamectl::IsFollowFamily(st)) {
+        // JPOG68: the game's state is the HUD player's - it must not block the other player in split-screen.
+        if (!(split && p != hudP) && !gamectl::IsDefaultState(st) && !gamectl::IsFollowFamily(st)) {
             LOG("dino: not in the park view (state vtbl %p) - ignored", st ? *(void**)st : nullptr);
             return;
         }
@@ -1423,6 +1797,7 @@ namespace {
         LOG("dino: player %d controls dino %p at (%.1f %.1f %.1f) health %.1f AI frozen%s%s%s", p + 1, unit, x, y, z, s.lastHealth,
             forced ? " [own pick]" : "", split ? " [split: own chase camera, no follow state]" : "", g_ctl[1 - p] ? " - BOTH players control a dino" : "");
         WakeIfAsleep(p, unit);   // JPOG40 (owner bug 3)
+        DropSel(p); if (g_selU[1 - p] == unit) DropSel(1 - p);   // JPOG68: selections done
         if (split) {
             // JPOG34 (owner bugs 4 + 7): the game's selection makes the HUD holder's camera a FOLLOW camera on this
             // dino (ADefaultState::UpdateSelectedUnit -> SetCameraType(AFollowCamera)). The rider has their own chase
@@ -1689,6 +2064,21 @@ namespace dinocontrol {
 void RequestControl(int player) { if (config::Get().dinoEnabled) InterlockedExchange(&g_reqControl, player); }
 void RequestInfo(int player) { InterlockedExchange(&g_reqInfo, player); }
 void RequestRelease(int player) { InterlockedExchange(&g_reqRelease, player); }
+void RequestSelectAt(int player, const float* pt) {
+    if (!config::Get().dinoEnabled || player < 0 || player > 1) return;
+    g_selPt[player][0] = pt[0]; g_selPt[player][1] = pt[1]; g_selPt[player][2] = pt[2];
+    InterlockedExchange(&g_reqSel, player);
+}
+bool HasSelection(int player) { return (player == 0 || player == 1) && g_selU[player] != nullptr; }
+// JPOG69 R1: game thread. Position of this player's own selection (null/false when there is none or it died);
+// *serial changes every time the player selects a dino.
+bool SelectedPos(int player, float* out, unsigned* serial) {
+    if (player < 0 || player > 1) return false;
+    if (serial) *serial = g_selSerial[player];
+    if (g_ctl[player]) return false;                    // riding: the chase camera owns the view
+    void* u = SelOf(player);
+    return u && DinoPos(u, out);
+}
 void RequestControlAt(int player, const float* pt) {
     if (!config::Get().dinoEnabled || player < 0 || player > 1) return;
     g_pickPt[player][0] = pt[0]; g_pickPt[player][1] = pt[1]; g_pickPt[player][2] = pt[2];
@@ -1715,7 +2105,7 @@ void* NearestUnitOf(const float* pt, float radius, uintptr_t tclassVa) {
 // 1.2 s = take control (Tick). The selection at press time is kept so an old selection never counts.
 volatile DWORD g_aT[2] = { 0, 0 }; void* volatile g_aSel[2] = { nullptr, nullptr };
 void NoteAPress(int player) {
-    if (player < 0 || player > 1 || !config::Get().aTakesControl || !config::Get().dinoEnabled) return;
+    if (player < 0 || player > 1 || !config::Get().dinoEnabled) return;   // JPOG68: also when A only selects
     void* sel = nullptr;
     GUARDED("selection at A press", { sel = gamectl::SelectedUnit(); });
     g_aSel[player] = sel;
@@ -1953,16 +2343,59 @@ void Tick(float dt) {
             LOG("dino: player %d RB + D-pad Up -> info bar for %p (ok=%d)", (int)inf + 1, u, ok);
         }
     }
+    // JPOG68 (owner 16:28: "A wouldn't select a lot of the time"): 0.25 s after the HUD player's A, the game's own
+    // selection decides first (dino -> that one, a building -> leave it); nothing / the same unit as before -> the nearest
+    // dinosaur to the game's aim point within [dino] select_radius becomes the selection (the game's too, so the vanilla
+    // ring + info + our "RB + D-pad Up" hint follow). [dino] a_takes_control = 1 still takes control at once.
     for (int p = 0; p < 2; ++p) {
         const DWORD t = g_aT[p];
         if (!t) continue;
-        if (GetTickCount() - t > 1200 || g_ctl[p]) { g_aT[p] = 0; continue; }
+        if (g_ctl[p]) { g_aT[p] = 0; continue; }
+        if (GetTickCount() - t < 250) continue;
+        g_aT[p] = 0;
         void* u = nullptr;
         GUARDED("selection after A", { u = gamectl::SelectedUnit(); });
-        if (u && u != g_aSel[p] && gamectl::IsA(u, kDinosaurClass)) {
-            g_aT[p] = 0;
-            LOG("dino: player %d pressed A on dino %p - taking control (JPOG57, [dino] a_takes_control)", p + 1, u);
-            Begin(p);
+        const bool isDino = u && gamectl::IsA(u, kDinosaurClass);
+        if (isDino && Controlled(u) && !(g_ctl[p] && g_s[p].dino == u)) {
+            gamectl::RequestHint(L"Another player controls that dinosaur", 3.0f);
+            continue;
+        }
+        if (isDino && (u != g_aSel[p] || !config::Get().aTakesControl)) {
+            SetSel(p, u);
+            if (config::Get().aTakesControl) {
+                LOG("dino: player %d pressed A on dino %p - taking control (JPOG57, [dino] a_takes_control)", p + 1, u);
+                Begin(p);
+            } else LOG("dino: player %d selected dino %p (game selection)", p + 1, u);
+            continue;
+        }
+        if (u && !isDino && u != g_aSel[p]) continue;   // the game selected a building / something else
+        float aim[3];
+        void* d = nullptr;
+        if (splitscreen::GameAim(aim)) GUARDED("select nearest dino at the aim", { d = NearestDino(aim, config::Get().dinoSelectRadius, nullptr); });
+        if (!d) { LOG("dino: player %d A - no dinosaur within %.0f m of the aim", p + 1, config::Get().dinoSelectRadius); continue; }
+        SetSel(p, d);
+        bool ok = false;
+        if (void* sel = *reinterpret_cast<void**>(game::At(kUnitSelection)))
+            ok = GUARDED("select dino for the HUD player", {
+                reinterpret_cast<void(__fastcall*)(void*, void*, const void*)>(game::At(kSetSelectedUnit))(sel, nullptr, d); });
+        LOG("dino: player %d A - the game picked %p, selected the nearest dino %p at the aim instead (game selection set %d)", p + 1, u, d, ok);
+        if (config::Get().aTakesControl) Begin(p, d);
+        else gamectl::RequestHint(L"Dinosaur selected - press RB + D-pad Up to control it", 4.0f);
+    }
+    // JPOG68: player 2 (no HUD) - A selects the dinosaur nearest the middle of their view (their own selection).
+    LONG sp = InterlockedExchange(&g_reqSel, -1);
+    if (sp == 0 || sp == 1) {
+        const float* pt = g_selPt[sp];
+        void* d = nullptr;
+        GUARDED("select dino near the view middle", { d = NearestDino(pt, config::Get().pickRadius, nullptr); });
+        if (d) {
+            SetSel((int)sp, d);
+            LOG("dino: player %d selected dino %p near (%.1f %.1f %.1f) - RB + D-pad Up takes it", (int)sp + 1, d, pt[0], pt[1], pt[2]);
+            gamectl::RequestHint(sp ? L"Player 2: dinosaur selected - press RB + D-pad Up to control it"
+                                    : L"Player 1: dinosaur selected - press RB + D-pad Up to control it", 4.0f);
+        } else {
+            LOG("dino: player %d A - no free dinosaur within %.0f m of (%.1f %.1f %.1f)", (int)sp + 1, config::Get().pickRadius, pt[0], pt[1], pt[2]);
+            gamectl::RequestHint(sp ? L"Player 2: no dinosaur there - aim at one and press A" : L"Player 1: no dinosaur there - aim at one and press A", 3.0f);
         }
     }
     // JPOG63 (owner 13:41): the old way back - selecting a dinosaur (aim/click + A, the game's own selection) shows a hint

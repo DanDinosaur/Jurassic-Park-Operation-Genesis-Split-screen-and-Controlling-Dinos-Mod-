@@ -7,6 +7,7 @@
 // export names ("DirectInput8Create", ...) exactly as the game imports them.
 #include <windows.h>
 #include <cstring>
+#include "extras.h"
 
 namespace {
     HMODULE g_real = nullptr;
@@ -48,7 +49,9 @@ DirectInput8Create(HINSTANCE hinst, DWORD ver, REFIID riid, LPVOID* out, void* o
     typedef HRESULT (WINAPI *P)(HINSTANCE, DWORD, REFIID, LPVOID*, void*);
     LoadAsiPlugins();
     static P p = (P)Real("DirectInput8Create");
-    return p ? p(hinst, ver, riid, out, outer) : E_FAIL;
+    HRESULT hr = p ? p(hinst, ver, riid, out, outer) : E_FAIL;
+    if (SUCCEEDED(hr) && out && *out) extras::OnDirectInput(*out);   // JPOG67: free keyboard
+    return hr;
 }
 
 __declspec(dllexport) HRESULT WINAPI DllCanUnloadNow(void) {

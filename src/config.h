@@ -133,6 +133,8 @@ struct Config {
     bool  startBorrow       = true;    // [coop] start_borrow: the player without the HUD presses Start = their Start menu
     bool  infoBarPad        = true;    // [controller] info_bar_pad: vanilla info bar buttons from the D-pad + A
     bool  pcWithoutPad      = true;    // [controller] pc_without_pad: no controller = PC style (free mouse, no centre lock)
+    float dinoSelectRadius  = 12.0f;   // [dino] select_radius (JPOG68): A on/near a dino the game's pick missed (m from the aim)
+    bool  mainMenuBothPads  = true;    // [controller] main_menu_both_pads (JPOG68): either pad drives the menus outside a park
     bool  dinoSelectHint    = true;    // [dino] select_hint (JPOG63): selecting a dino shows the RB + D-pad Up hint
     bool  rideHud           = false;    // [dino] ride_hud (JPOG62): the HUD player rides a dino = HUD shows only ride_hud_mask
     int   rideHudMask       = 0x1100;  // [dino] ride_hud_mask (JPOG62): HUD bits while riding (0x100 dino stats, 0x1000 minimap)
@@ -141,9 +143,43 @@ struct Config {
     bool  iconHudReproj     = true;    // [coop] icon_hud_reproj (JPOG62): HUD half's icons/bubbles re-projected like the other half's
     int   dinoBackAll       = 1;       // [dino] back_all (JPOG60): stick down walks backwards for EVERY species (walk_lp if no walk_bck_lp)
     bool  dinoStrafeBack    = true;    // [dino] strafe_back: stick sideways = strafe, down = walk backwards (no running)
+    bool  dinoFenceBreak    = true;    // [dino] fence_break (JPOG69 R4): a player's dino breaks a fence after fence_bites bites (never by walking into it)
+    float dinoFenceReach    = 5.0f;    // [dino] fence_reach: metres beyond the dino's own radius
+    int   dinoFenceBites    = 5;       // [dino] fence_bites (owner 17:09): bites on the same fence section that break it
+    bool  dinoBiteFrontOnly = true;    // [dino] bite_front_only (JPOG69 R7): bites hit only a dino in front of the mouth
+    int   mrDna             = 1;       // [unlocks] mr_dna (JPOG69 R3): 1 = every species 100% DNA, 2 = vanilla Mr DNA (park's species), 0 = off
+    bool  p2SelectFly       = true;    // [coop] p2_select_fly (JPOG69 R1): the player without the HUD: A on a dino flies their camera to it
+    float p2SelectDist      = 30.0f;   // [coop] p2_select_dist: camera distance after that fly-in
+    bool  p2CamMatch        = true;    // [coop] p2_cam_match (JPOG69 R5): player 2's camera stick = player 1's key speeds
+    float p2StickFull       = 0.7f;    // [coop] p2_stick_full: stick push that gives full camera speed
+    float p2ZoomSpeed       = 1.0f;    // [coop] p2_zoom_speed: extra multiplier on player 2's zoom (1 = same as player 1)
+    bool  dinoRbTurn        = true;    // [dino] rb_turn (JPOG69 R2): RB held = turn right, RB tap = finishing move
+    float dinoRbTapTime     = 0.25f;   // [dino] rb_tap_time: RB released sooner = tap (finisher)
+    float dinoRbTurnSpeed   = 100.0f;  // [dino] rb_turn_speed: degrees per second
+    float dinoRbTurnSign    = 1.0f;    // [dino] rb_turn_invert = 1 -> RB turns left (test switch)
+    bool  dinoStepByFacing  = true;    // [dino] step_by_facing (JPOG69 R6): side/back step chosen by the dino's facing, not the stick
+    float dinoStepInvX      = 1.0f;    // [dino] step_invert_x (JPOG69 R6 test switch): 1 -> -1 = side-steps go the other way
     float dinoStrafeSpeed   = 2.0f;    // [dino] strafe_speed (m/s at full stick)
     float dinoBackSpeed     = 1.6f;    // [dino] back_speed (m/s at full stick)
     bool  dinoDrink         = true;    // [dino] drink: A = drink, only next to water
+    int   dinoFinisherAlign = 1;       // [dino] finisher_align (JPOG65): 1 = line up paired kills like vanilla (Units.dll
+                                       //   SetFatalityAnims "perfect" distance), 2 = vanilla walk-in window (required - 0.25), 0 = off
+    float dinoFinisherDistAdd = 0.0f;  // [dino] finisher_dist_add (JPOG65): metres added to the vanilla distance (tuning)
+    bool  dinoFinisherInterp = true;   // [dino] finisher_interp (JPOG65): SetInterpolation / no avoidance steer during the kill (SpecAttk.fsm)
+    bool  ownWidescreen     = true;    // [hud] widescreen (JPOG66): our own Hor+ / unstretched GUI (off by itself when JPOGMouseFix.asi is loaded)
+    bool  hudHorPlus        = true;    // [hud] hor_plus: wide screens show more at the sides instead of cropping top/bottom
+    bool  hudGuiFix         = true;    // [hud] gui_fix: GUI drawn with one uniform scale, centred (split: in the HUD player's half)
+    float hudScale          = 1.0f;    // [hud] scale: GUI size, one player (1.0 = fit the screen, max 2.0)
+    float hudSplitScale     = 1.3f;    // [hud] split_scale: GUI size in split-screen (1.0 = fit the half)
+    bool  hudPinEdges       = true;    // [hud] pin_edges (JPOG67): HUD panels + disc menus sit on the real screen / half edges
+    bool  freeKeyboard      = true;    // [display] free_keyboard (JPOG67): keyboard not grabbed (Windows key, Print Screen, Alt+Tab)
+    bool  altF4Quit         = true;    // [display] alt_f4_quit: Alt+F4 closes the game
+    bool  borderless        = false;   // [display] borderless: windowed mode (Options.ini ScreenWindowed = true) -> borderless full screen
+    float mouseSpeed        = 0.5f;    // [mouse] cursor_speed: park / menu cursor speed (1.0 = game default)
+    bool  cursorNoAccel     = true;    // [mouse] no_accel: no cursor acceleration (1:1 movement)
+    bool  camFixSmoothing   = true;    // [camera] fix_smoothing: park camera speed-up / braking takes the same time at any FPS
+    float camSmoothingFps   = 30.0f;   // [camera] smoothing_fps: reference FPS for that (30 = like the original)
+    float dinoPounceGap     = 3.0f;    // [dino] pounce_gap (JPOG65): raptor latches only at this gap (m, edge to edge; RaptHunt.fsm <= 3.5)
     bool  vehiclePad        = true;    // [vehicle] pad_sticks: sticks drive the helicopter / jeeps / mini games (console layout)
     int   soundLimit        = 3;       // [coop] sound_limit: split only - max starts of one sound sample per second (0 = off)
     bool  gunSound          = true;    // [vehicle] gun_sound: player-driven vehicle guns without a sound get gun_sound_id

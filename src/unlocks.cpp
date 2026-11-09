@@ -23,6 +23,9 @@ namespace {
     bool     g_missionsOpened = false;
     void*    g_park = nullptr;        // AParkInfo* of the park we're tuned to
     unsigned g_parkFrame0 = 0;        // frame the park appeared
+    bool     g_dnaDone = false;       // JPOG69 R3: Mr DNA status logged for this park
+    DWORD    g_dnaCheckT = 0;         // JPOG69: last Mr DNA check (real time)
+    int      g_dnaTries = 0;          // JPOG69: Mr DNA calls in this park
 
     void OpenMissionsOnce() {
         if (g_missionsOpened) return;
@@ -99,7 +102,7 @@ void Tick() {
     if (!pi || !pl || !rm || !fh) { g_park = nullptr; return; } // not in a park
 
     if (pi != g_park) {                                        // new park loaded
-        g_park = pi; g_parkFrame0 = g_frame;
+        g_park = pi; g_parkFrame0 = g_frame; g_dnaDone = false; g_dnaTries = 0;
         LOG("unlocks: park detected (ParkInfo=%p) - applying in ~3 s", pi);
         return;
     }
@@ -122,6 +125,38 @@ void Tick() {
         Fn<fn_this0>(game::addr::AResearchManager_CheatGiveAllResearch)(rm, nullptr);
     if (c.allDigSites && (first || slow))
         UnlockFossils(fh);
+    // JPOG69 R3 (owner 16:47): every species unlocked + selectable in the hatchery = the cheat menu's DNA cheat, always.
+    // ACheatActivator::ActivateCheat case 9 ("Mr DNA") = ADinoList::CheatGiveValidFullDNA (100% DNA, only species already
+    // in the park's set, flag 0x80); ADinoList::CheatGiveAllFullDNA 0x5FFEF0 also puts EVERY species in the set
+    // (ADinoInfo::PutInSelectedSet) - the owner wants all of them. DinoList = ADNAManager (AParkManager::m_pDNAManager
+    // 0x850064) + 0x28. Once per park, after the load has settled. [unlocks] mr_dna (0 = off, 1 = all species, 2 = vanilla Mr DNA).
+    // JPOG69 (owner 17:14): saved parks too. A save restores its own DNA list while it loads, so instead of one call right
+    // after the park appears: check every ~3 s (real time) and only call the cheat when a species is missing - not in the
+    // park's set (ADinoInfo +0x0F bit 0x80, PutInSelectedSet) or below 100% DNA (ADinoInfo::GetDNALevel 0x469700 = +0x18).
+    // Entries: list +4, 0x40 bytes each, count list +0xA04.
+    if (c.mrDna) {
+        const DWORD now = GetTickCount();
+        void* dm = Static(0x00850064);
+        if (dm && now - g_dnaCheckT >= 3000) {
+            g_dnaCheckT = now;
+            uint8_t* list = (uint8_t*)dm + 0x28;
+            const int n = I32(list, 0xA04);
+            int missing = 0;
+            for (int k = 0; k < n && k < 40; ++k) {   // 0xA00 bytes = 40 entries
+                uint8_t* e = list + 4 + k * 0x40;
+                const bool inSet = (e[0x0F] & 0x80) != 0;
+                if ((c.mrDna != 2 && !inSet) || (inSet && (signed char)e[0x18] < 100)) ++missing;
+            }
+            if (missing > 0 && n > 0 && n <= 40 && g_dnaTries < 3) {
+                ++g_dnaTries;   // at most 3 calls per park: if the level byte never reads 100 we stop instead of calling every 3 s
+                Fn<fn_this0>(c.mrDna == 2 ? 0x005FFEE0 : 0x005FFEF0)(list, nullptr);
+                LOG("unlocks: Mr DNA - %d of %d species were missing or below 100%% -> %s species given 100%% DNA ([unlocks] mr_dna = %d)",
+                    missing, n, c.mrDna == 2 ? "the park's" : "ALL", c.mrDna);
+            } else if (!g_dnaDone) LOG("unlocks: Mr DNA - all %d species already in the park at 100%%", n);
+            g_dnaDone = true;
+        }
+    }
+
 }
 
 } // namespace unlocks

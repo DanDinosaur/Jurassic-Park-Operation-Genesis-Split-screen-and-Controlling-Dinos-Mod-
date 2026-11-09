@@ -31,6 +31,7 @@
 #include "minipad.h"
 #include "gamectl.h"
 #include "detour.h"
+#include "widescreen.h"
 
 namespace {
     // ---- TRenderInterface.dll exports (thiscall -> __fastcall with dummy EDX) ----
@@ -893,6 +894,8 @@ namespace {
         float f = *reinterpret_cast<float*>((uint8_t*)c + 0x134);
         return (f > 0.05f && f < 3.0f) ? f : fallback;     // radians, sane range only
     }
+    int g_camMatchLogs = 0;
+    bool g_fly[2] = { false, false }; unsigned g_flySerial[2] = { 0, 0 }; float g_flyT[2] = { 0, 0 };   // JPOG69 R1
     void UpdateInactiveCamera(float dt) {
         if (!WorldReady()) return;   // JPOG35: never update cameras while the park world is being torn down
         int who = 1 - (int)g_activePlayer;
@@ -947,8 +950,9 @@ namespace {
             if (bld) {
                 LOG("split: player %d (no HUD) A on building %p - its own window", who + 1, bld);
                 p2menu::OpenUnitWindow(who, bld);
-            } else if (okT && (!pad.Pressed(PAD_A) || cf0.aTakesControl)) dinocontrol::RequestControlAt(who, t);
-            else if (okT) LOG("split: player %d A - no building there; dinos are taken with RB + D-pad Up ([dino] a_takes_control = 0)", who + 1);
+            } else if (okT && pad.Pressed(PAD_A) && !cf0.aTakesControl) dinocontrol::RequestSelectAt(who, t);   // JPOG68: A selects
+            else if (okT && !pad.Pressed(PAD_A) && dinocontrol::HasSelection(who)) dinocontrol::RequestControl(who);  // JPOG68: RB + Up = the selected one
+            else if (okT) dinocontrol::RequestControlAt(who, t);
         }
         auto F = [&](int slot, float v) { if (v > 0.0f) VSlot<fn_vf>(c, slot)(c, nullptr, v * dt); };
         auto Zero = [&](int off) { *reinterpret_cast<float*>((uint8_t*)c + off) = 0.0f; };
@@ -962,8 +966,51 @@ namespace {
         if (menu || p2menu::WindowOpen(who)) fx = fy = 0.0f;   // JPOG49: stick and D-pad point at the disc's pictures (JPOG59: or the window's buttons)
         if (fy > 1.0f) fy = 1.0f; if (fy < -1.0f) fy = -1.0f; if (fx > 1.0f) fx = 1.0f; if (fx < -1.0f) fx = -1.0f;
         if ((fx != 0.0f || fy != 0.0f) && g_panLogs < 3) { ++g_panLogs; LOG("split: player %d pans their own view (stick %.2f,%.2f)", who + 1, fx, fy); }
+        // JPOG69 R5 (owner 16:50: player 2's zoom "a lot slower"): player 1's stick becomes the game's camera KEYS
+        // (input_map: past the dead zone = key held = full speed) and AScrollingState::ProcessInput 0x55C3D0 passes
+        // push / rotate = frame time but ZOOM = 2 x frame time (0x55C5C5 / 0x55C60F: fadd st,st before InputZoomIn /
+        // InputZoomOut). Player 2 got the raw analog value x 1 frame time. Now: the same curve (full speed from
+        // [coop] p2_stick_full of the push, default 0.7) and zoom x 2 x [coop] p2_zoom_speed (default 1.0).
+        auto Curve = [&](float v) {
+            const float full = cf.p2StickFull > 0.05f ? cf.p2StickFull : 0.05f;
+            float a = fabsf(v) / full; if (a > 1.0f) a = 1.0f;
+            return v < 0 ? -a : a;
+        };
+        if (cf.p2CamMatch) { fy = Curve(fy); fx = Curve(fx); }
         fy *= cf.p2MoveSign * boost; fx *= boost;
         float rx = pad.RX() * cf.p2YawSign, zoomIn = pad.RY() * cf.p2PitchSign;
+        if (cf.p2CamMatch) {
+            rx = Curve(rx); zoomIn = Curve(zoomIn) * 2.0f * cf.p2ZoomSpeed;
+            if ((rx != 0.0f || zoomIn != 0.0f) && g_camMatchLogs < 2) { ++g_camMatchLogs; LOG("split: player %d camera speeds = player 1's keys (rotate %.2f, zoom %.2f x frame time, JPOG69 [coop] p2_cam_match)", who + 1, rx, zoomIn); }
+        }
+        // JPOG69 R1 (owner 16:47): A on a dino for the player WITHOUT the HUD only stored the selection - vanilla (player 1)
+        // swaps to the game's follow camera, which flies down to the dino and follows it. Same for this player's own world
+        // camera: ACamera::SetFocalPoint 0x50B260 (smooth, false) on the dino every frame + ACamera::SetDistance 0x50B510
+        // (smooth) to [coop] p2_select_dist once per new selection; panning with the stick / D-pad ends the follow.
+        if (cf.p2SelectFly) {
+            float sp[3]; unsigned ser = 0;
+            const bool has = dinocontrol::SelectedPos(who, sp, &ser);
+            if (ser != g_flySerial[who]) {
+                g_flySerial[who] = ser;
+                g_fly[who] = has;
+                if (has) {
+                    g_flyT[who] = 0.0f;
+                    GUARDED("select fly: distance", {
+                        reinterpret_cast<void(__fastcall*)(void*, void*, float, bool)>(game::At(0x0050B510))(c, nullptr, cf.p2SelectDist, false); });
+                    LOG("split: player %d selected a dino - their camera flies to (%.1f %.1f %.1f), distance %.0f (JPOG69 [coop] p2_select_fly)",
+                        who + 1, sp[0], sp[1], sp[2], cf.p2SelectDist);
+                }
+            }
+            if (g_fly[who] && (!has || fx != 0.0f || fy != 0.0f)) {
+                g_fly[who] = false;
+                LOG("split: player %d camera stops following the selected dino (%s)", who + 1, has ? "panned" : "selection gone");
+            }
+            if (g_fly[who]) {
+                g_flyT[who] += dt;
+                GUARDED("select fly: focal point", {
+                    reinterpret_cast<void(__fastcall*)(void*, void*, const float*, bool)>(game::At(0x0050B260))(c, nullptr, sp, false); });
+            }
+        }
         bool ok = GUARDED("inactive camera update", {
             if (fy > 0) F(cam::PushFwd, fy); else if (fy < 0) F(cam::PushBack, -fy); else Zero(cam::VelFwd);
             if (fx > 0) F(cam::PushRight, fx); else if (fx < 0) F(cam::PushLeft, -fx); else Zero(cam::VelSide);
@@ -1444,6 +1491,20 @@ namespace {
 
 namespace splitscreen {
 
+// JPOG68: the game's own aim point (ATarget::GetTargettedTerrain on AGameController+0x2C) - what the HUD player's
+// centre cursor points at, split-screen or not. Game thread.
+bool GameAim(float* out) {
+    bool have = false;
+    GUARDED("game aim point", {
+        void* root = *reinterpret_cast<void**>(game::At(kRootTaskPtr));
+        void* gc = root ? *reinterpret_cast<void**>((uint8_t*)root + 0x2C) : nullptr;
+        void* tgt = gc ? *reinterpret_cast<void**>((uint8_t*)gc + 0x2C) : nullptr;
+        const float* t = tgt ? reinterpret_cast<fn_gettgt>(game::At(kGetTargettedTerrain))(tgt, nullptr) : nullptr;
+        if (t && std::isfinite(t[0]) && std::isfinite(t[2])) { out[0] = t[0]; out[1] = t[1]; out[2] = t[2]; have = true; }
+    });
+    return have;
+}
+
 bool Active() { return g_active; }
 int  ActivePlayer() { return g_active ? (int)g_activePlayer : 0; }
 bool MenuLocked() { return g_active && g_menuOpen != 0; }
@@ -1506,7 +1567,7 @@ bool GuiOffsetTo(int p, int& dx, int& dy) {
     float ox, oy, ow, oh, ax, ay, aw, ah;
     RectFor(p, ox, oy, ow, oh); RectFor((int)g_activePlayer, ax, ay, aw, ah);
     float s = aw / gw; if (ah / gh < s) s = ah / gh;
-    float k = s_k; if (k < 1.0f) k = 1.0f; if (k > 2.0f) k = 2.0f;
+    float k = widescreen::Active() ? widescreen::SplitScale() : s_k; if (k < 1.0f) k = 1.0f; if (k > 2.0f) k = 2.0f;
     if (k > 1.0f) { float kmax = aw / (s * gw * 0.5f); if (k > kmax) k = kmax; }
     s *= k;
     if (s <= 0.01f) return false;

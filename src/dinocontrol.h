@@ -20,6 +20,9 @@ namespace dinocontrol {
     void RequestRelease(int player);   // controller thread
     // JPOG34: the player without the HUD: control the nearest dino to pt (ground point under the middle of their view).
     void RequestControlAt(int player, const float* pt);
+    void RequestSelectAt(int player, const float* pt);   // JPOG68: player's own selection (nearest dino to pt)
+    bool HasSelection(int player);                       // JPOG68
+    bool SelectedPos(int player, float* out, unsigned* serial);   // JPOG69 R1: own selection's position + change counter
     // JPOG34: nearest live, uncontrolled dinosaur to pt within radius (game thread). outPos may be null.
     void* NearestDino(const float* pt, float radius, float* outPos);
     void* NearestUnitOf(const float* pt, float radius, uintptr_t tclassVa);   // JPOG57: any live unit of a class (game thread)

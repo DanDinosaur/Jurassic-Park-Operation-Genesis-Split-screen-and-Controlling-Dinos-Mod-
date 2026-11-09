@@ -97,8 +97,7 @@ foreach ($f in "dinput8.dll","JPOGMouseFix.asi") {
     $src = Join-Path $bin $f
     if (-not (Test-Path $src)) {
         if ($f -eq "dinput8.dll") { throw "missing $src" }
-        if (Test-Path (Join-Path $Game $f)) { Write-Host "kept your own $f (widescreen / HUD plugin)" }
-        else { Write-Warning "$f (JPOG-Modernize widescreen / HUD plugin) not included - the mod works without it; see README" }
+        if (Test-Path (Join-Path $Game $f)) { Write-Host "found your own $f - the mod's own widescreen stays off while it is there (rename it to $f.off to use the mod's own; see README)" }
         continue
     }
     $dst = Join-Path $Game $f
@@ -109,7 +108,7 @@ Merge-Ini (Join-Path $bin "jpogmod.ini") (Join-Path $Game "jpogmod.ini")
 if (Test-Path (Join-Path $bin "JPOGMouseFix.ini")) { Merge-Ini (Join-Path $bin "JPOGMouseFix.ini") (Join-Path $Game "JPOGMouseFix.ini") }
 if (-not $easy) {   # normal game: the mod's always-on unlocks off
     $p = Join-Path $Game "jpogmod.ini"; $s = [IO.File]::ReadAllText($p)
-    foreach ($k in "site_b","all_research","all_dig_sites","max_stars","infinite_money") {
+    foreach ($k in "site_b","all_research","all_dig_sites","max_stars","infinite_money","mr_dna") {
         $s = [regex]::Replace($s, "(?m)^([ \t]*" + $k + "[ \t]*=[ \t]*)\d+", '${1}0')
     }
     [IO.File]::WriteAllText($p, $s); Write-Host "normal start: unlocks / infinite money off in jpogmod.ini"
