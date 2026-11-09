@@ -1,0 +1,183 @@
+# JPOG Co-op v2 - controller play + 2-player split-screen for Jurassic Park: Operation Genesis (PC)
+
+A fan mod for the 2003 PC game **Jurassic Park: Operation Genesis** (JPOG). It adds:
+
+- **Full Xbox-style controller play**: no mouse needed (built and tested on a ROG Ally docked to a TV).
+- **2-player split-screen co-op**: one shared park and budget. Each player has their own camera, their own build / Manager / Dinosaurs / Actions menus and their own windows.
+- **Ride and fight as any dinosaur**: walk, run, strafe, bite, roar, eat, drink, sleep, pounce, finishing moves.
+- Optional **easy start**: all research and dig sites, parks start at 5 stars, money never runs out.
+
+> **This mod contains NO game files.** You need your own copy of Jurassic Park: Operation Genesis (PC).
+> The installer only adds the mod's own files next to `SimJP.exe` and makes small text edits to your own
+> game data files. Every original it changes is backed up first as `*.prejpogmod.bak`, and `uninstall.bat`
+> puts them all back.
+>
+> Not affiliated with or endorsed by Universal, Blue Tongue, Vivendi or anyone who owns Jurassic Park.
+
+---
+
+## ⚠️ Made for controllers, not keyboard and mouse
+
+This mod was designed and tested for **Xbox controllers (XInput)**. The keyboard and mouse still work the way the
+original game does, and a few keyboard keys were added for riding dinosaurs. But many parts of the mod
+(split-screen, player 2, menus, dinosaur riding) are built around controllers and work best with them.
+
+- **Player 2 is controller only.** The game has only one mouse cursor and one keyboard, and they always belong to player 1.
+- **No controller connected** = the game plays like the normal PC game (free mouse, PC menus). The mod switches back to
+  controller style by itself when you connect one.
+- PlayStation / Switch controllers: use them through **Steam Input** or another XInput translator.
+
+---
+
+## Requirements
+
+- Jurassic Park: Operation Genesis for PC (the retail `SimJP.exe`; the mod's engine addresses are for that version).
+- Windows 10 / 11.
+- One Xbox (XInput) controller, two for split-screen.
+
+## Install
+
+1. Download the release zip and unzip it anywhere, for example next to your game folder.
+2. Double-click **`install.bat`**. It finds `SimJP.exe` by itself, or asks you once for the folder.
+   - The first time, it asks **"Easy start?"**: `Y` = all research and dig sites, parks start at 5 stars, money never runs out.
+     `N` = the normal game. You can change it later in `jpogmod.ini` (`[unlocks]`).
+   - You can run it again any time (for example after updating). Your settings are kept, and new settings are added.
+3. Play with **`Launch JPOG.bat`**, or start the game as usual.
+
+**Uninstall:** `uninstall.bat` removes the mod and restores every original file.
+
+### Widescreen / split-screen HUD plugin (optional, see "Known limits")
+The split-screen HUD (each player's menus and HUD drawn in their own half) works together with the
+**JPOG-Modernize** widescreen plugin by Newbie1337x (https://github.com/Newbie1337x/JPOG-Modernize). That plugin has no
+licence, so it is **not included here**. The mod works without it.
+
+---
+
+## Split-screen co-op
+
+- **Split-screen starts only when TWO controllers are connected.** Load a park, then connect or switch on the second
+  controller. After about 2 seconds the screen splits. Unplug or switch off a controller and it goes back to one player.
+- Default: **left / right (vertical)**. To change it: Start → Options → **"Split: Vertical / Horizontal"**, or press **F12**.
+- Controllers follow **who is connected, not the USB / Bluetooth slot**. The first connected controller is player 1 and the
+  second is player 2. If player 1's controller is replaced (for example a ROG Ally's built-in pad switches off when a
+  Bluetooth pad connects), the new one simply becomes player 1. No remapping, and no accidental player 2.
+- One shared park and one shared budget. Each player has their own camera and aiming circle (blue = player 1,
+  yellow = player 2).
+- **Player 1** has the game's own HUD and menus. **Player 2** has their own copy of the build, Manager, Dinosaurs and
+  Actions menus and their own windows, in their half. You can both build at the same time.
+- When one player rides a dinosaur, the other player gets the game HUD automatically.
+- If both players want the same one-of-a-kind thing (the same window, or demolish mode), the game says
+  "Player N is using X - only one player at a time".
+- (F11 forces split-screen on or off for testing, but player 2 can only play with a controller.)
+
+---
+
+## Controller - building the park (console style, the default)
+
+| Button | Player 1 (game HUD) | Player 2 |
+|---|---|---|
+| Left stick / D-pad | move the view; move the highlight in menus | move your own view; menus |
+| Right stick | rotate (left/right) and zoom (up/down) | rotate / zoom your own view |
+| A | select / place / confirm (aim with the middle of your view) | open the building at the middle of your view; pick / place in your menus |
+| B | back / cancel | back / close |
+| X | Build menu | your Build menu |
+| Y | Manager menu | your Manager menu |
+| LT | Dinosaurs menu | your Dinosaurs menu |
+| RT (tap) | Actions menu (in other screens: RT = select) | your Actions menu |
+| RT (hold) + left stick | pan the camera quickly | - |
+| LB / RB | previous / next, rotate a building while placing it | rotate a building / change brush size |
+| Start | Start menu (save / load / options / quit) | Start menu (borrowed, then handed back to player 1) |
+| Back (tap) | Research | - |
+| Left-stick click | tactical map | - |
+| Right-stick click | switch console style ↔ PC style (stick = mouse cursor, RT = left click, LT = right click) | - |
+| RB + D-pad Up | **take control of the selected dinosaur** | take control of the dinosaur nearest the middle of your view |
+
+**Ring menus (Start, Manager, ...):** push the stick or D-pad toward an option, A = choose.
+
+**Windows** (Finance, buildings, hatchery, info bar, ...): D-pad or left stick moves a highlight over the buttons,
+**A** presses it, **B** closes the window. Holding a direction repeats. On pickers and sliders (for example the hatchery's
+Category / Species / Release mode), **left / right changes the value**.
+
+**Player 2 tools:** placing = D-pad ◀ ▶ change item, LB / RB rotate, A place, B close. Paths and fences = A start / A finish,
+B cancel. Trees = A plant, Y remove, LB / RB brush size. Terrain = A shape the land, LB / RB size. Demolish = press A twice
+to confirm.
+
+**Screens with no buttons to highlight** (for example the fossil hunt map): the left stick moves a pointer and A clicks.
+
+## Riding dinosaurs
+
+**How to take control:**
+1. Aim at a dinosaur (or click it) and press **A**. It is selected, and a message tells you the button combo.
+2. Press **RB + D-pad Up** (keyboard: **T**). You now control it, and the controls appear on screen.
+3. **B** (keyboard: **T** again) lets go and takes you back to building.
+
+Player 2: aim at a dinosaur and press **RB + D-pad Up**. You take the dinosaur nearest the middle of your view.
+
+| Controller | Keyboard (player 1) | Action |
+|---|---|---|
+| Left stick | I / K / J / L | walk forward / walk backwards / strafe left / strafe right |
+| Left-stick click | Right Shift | run on / off |
+| Right stick | Numpad 4 / 6 / 8 / 2 (playing alone: Q / E / R / F) | camera |
+| D-pad Up / Down | Numpad + / - | zoom in / out |
+| D-pad Left / Right | - | camera up / down |
+| RT | U | bite / attack |
+| RB | H | finishing move |
+| LT | O | pounce / special move (Raptor leap, rear-up, ...) |
+| Y | Y | roar (hold = second call) |
+| X | N | eat (big carnivores next to a goat or cow: grab and swallow) |
+| A | G | drink (next to water) |
+| LB | Z | lie down and sleep |
+| B | T | let go |
+
+Riding ends by itself if the dinosaur dies, you leave the park, or split-screen ends. Nobody can take a dinosaur the
+other player is riding. Both players can ride at the same time, and each gets their own chase camera.
+
+## Vehicles and mini games
+
+Ranger helicopter and jeeps: the sticks fly, drive and aim. **RT** = fire, **LT** = the right mouse button action.
+
+## Keyboard keys added by the mod
+
+| Key | What it does |
+|---|---|
+| T | take control of the selected dinosaur / let go |
+| I J K L, Right Shift, U H O Y N G Z, Numpad 2 4 6 8 + - | riding (see the riding table) |
+| F11 | force split-screen on / off (testing) |
+| F12 | split vertical ↔ horizontal |
+
+Every other key works as in the original game (WASD / arrows = camera, Q / E rotate, R / F zoom, B build, F1-F5 menus, ...).
+All of the mod's keys can be changed in `jpogmod.ini` → `[keys]`.
+
+---
+
+## Settings - `jpogmod.ini` (in the game folder)
+
+Every setting is explained by a comment in the file. Useful ones:
+
+- `[controller]`: `console_mode` (1 = controller style, 0 = PC style), `vibration`, `deadzone`, `window_spinners`
+- `[coop]`: `split_orientation`, `auto_split`, `zoom_out_mult`
+- `[dino]`: `a_takes_control` (1 = A takes control at once instead of RB + D-pad Up), `select_hint`, `attack_range`, `run_mult`, camera options
+- `[unlocks]`: easy start on / off (`all_research`, `all_dig_sites`, `infinite_money`, ...)
+- `[keys]`: the keyboard keys above
+- `[general]`: `log` - the mod writes `jpogmod.log` in the game folder. Include it when you report a bug.
+
+---
+
+## Known limits
+
+- **Without the JPOG-Modernize plugin**, split-screen still works, but the game's HUD and menus are drawn across the
+  whole screen instead of only in the HUD player's half. There is also no Hor+ widescreen.
+- Player 2 has no keyboard or mouse controls.
+- Some game windows exist only once in the game (for example the Start menu and full-screen reports), so only one player
+  can have them open at a time.
+- Built and tested on one setup (ROG Ally + TV, 1920x1080, Windows 11). Please report problems with your `jpogmod.log`.
+
+## Building from source
+
+See [BUILD.md](BUILD.md). The source is in `src/`. It is a `dinput8.dll` proxy that hooks the game at run time; no game
+code or data is included.
+
+## Credits
+
+- JPOG-Modernize (widescreen / HUD plugin, not included) - Newbie1337x: https://github.com/Newbie1337x/JPOG-Modernize
+- Jurassic Park: Operation Genesis - Blue Tongue Entertainment / Universal Interactive (2003).

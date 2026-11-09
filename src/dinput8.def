@@ -1,0 +1,8 @@
+; dinput8.def - module name only.
+; Exports are provided by proxy.cpp via `extern "C" __declspec(dllexport)`
+; and undecorated by the linker flag -Wl,--kill-at (see NEW_SESSION_INSTRUCTIONS.md).
+; The old forwarding-style EXPORTS block was removed: on the 32-bit mingw target
+; it produced a forward string of "_dinput8_real.DirectInput8Create" (stray leading
+; underscore) that Windows could not resolve. proxy.cpp loads the real system
+; dinput8.dll at runtime instead, which is robust and needs no dinput8_real.dll copy.
+LIBRARY dinput8

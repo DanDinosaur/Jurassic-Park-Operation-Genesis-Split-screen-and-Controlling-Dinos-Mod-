@@ -1,0 +1,11 @@
+# never commit game files or build output
+*.exe
+*.dll
+*.asi
+*.tml
+*.tmd
+*.sav
+build/
+out/
+installer/files/dinput8.dll
+installer/game_path.txt
