@@ -1,5 +1,5 @@
 @echo off
-REM  JPOG Co-op v2 - play. Starts Jurassic Park: Operation Genesis with the mod.
+REM  JPOG Co-op v3 - play. Starts Jurassic Park: Operation Genesis with the mod.
 setlocal
 set "GAME="
 if exist "%~dp0game_path.txt" set /p GAME=<"%~dp0game_path.txt"

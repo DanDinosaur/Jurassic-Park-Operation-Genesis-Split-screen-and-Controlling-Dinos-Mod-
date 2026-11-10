@@ -1,4 +1,4 @@
-# uninstall.ps1 - removes JPOG Co-op v2 and restores every original from its *.prejpogmod.bak.
+# uninstall.ps1 - removes JPOG Co-op v3 and restores every original from its *.prejpogmod.bak.
 param([string]$Game = "")
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "findgame.ps1")

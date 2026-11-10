@@ -117,6 +117,9 @@ struct Config {
     bool  overlayOwnProj    = true;    // [coop] overlay_own_proj (JPOG57): highlight box / floating text with the half's own projection
     bool  riderSoundFollow  = true;    // [coop] rider_sound_follow (JPOG57): a rider's dino sounds stay at the same offset from the moving listener
     bool  aTakesControl     = false;   // [dino] a_takes_control (JPOG57): A on a dino = take control for the HUD player too
+    bool  fmodStreamGuard   = true;    // [general] fmod_stream_guard (JPOG78): survive FMOD's stream-thread NULL-link crash (fmod.dll+0x22995)
+    bool  stateGuard        = true;    // [coop] state_guard (JPOG77): a building-window button can't remove the park's last game state (safari track from a no-HUD window unloaded the park)
+    bool  stateGuardHud     = true;    // [coop] state_guard_handover (JPOG77): after such a kept click by the player without the HUD, the HUD goes to that player
     bool  unloadSplitOff    = true;    // [coop] unload_split_off (JPOG58): end split-screen inside ARootTask::UnloadGameController, before the park is torn down
     bool  dinoZzzAlways     = true;    // [dino] zzz_always (JPOG57): the sleep icon over a controlled sleeping dino without holding the info key
     bool  treeKnockOnce     = true;    // [dino] tree_knock_once (JPOG57): a player's dino knocks each tree cell once per 3 s
@@ -139,6 +142,9 @@ struct Config {
     bool  rideHud           = false;    // [dino] ride_hud (JPOG62): the HUD player rides a dino = HUD shows only ride_hud_mask
     int   rideHudMask       = 0x1100;  // [dino] ride_hud_mask (JPOG62): HUD bits while riding (0x100 dino stats, 0x1000 minimap)
     bool  windowSpinners    = true;    // [controller] window_spinners (JPOG62): D-pad/stick left-right turn pickers/sliders in windows
+    bool  frontendClear     = true;    // [display] frontend_clear (JPOG72): front end = whole back buffer black each frame (pointer trails in the pillarbox)
+    bool  p2RepairPopup     = false;   // [coop] p2_repair_popup (JPOG72): 0 = player 2's building window never raises the shared "Repair?" popup (it crashed: tguiinterface+0x13A71)
+    bool  guiFocusGuard     = true;    // [coop] gui_focus_guard (JPOG72): a focus change on a widget that is on no screen is skipped + logged instead of crashing
     bool  popupCallerLog    = true;    // [coop] popup_caller_log (JPOG62): log who opens a message popup while player 2 has a window
     bool  iconHudReproj     = true;    // [coop] icon_hud_reproj (JPOG62): HUD half's icons/bubbles re-projected like the other half's
     int   dinoBackAll       = 1;       // [dino] back_all (JPOG60): stick down walks backwards for EVERY species (walk_lp if no walk_bck_lp)
@@ -156,6 +162,23 @@ struct Config {
     bool  dinoRbTurn        = true;    // [dino] rb_turn (JPOG69 R2): RB held = turn right, RB tap = finishing move
     float dinoRbTapTime     = 0.25f;   // [dino] rb_tap_time: RB released sooner = tap (finisher)
     float dinoRbTurnSpeed   = 100.0f;  // [dino] rb_turn_speed: degrees per second
+    float dinoStickCone     = 60.0f;   // [dino] stick_cone (JPOG73): left stick within this many degrees of straight up = walk straight (0 = old direction-relative stick)
+    bool  dinoStickLock     = true;    // [dino] stick_lock (JPOG77): stick in the front half locks the walk heading (camera forward when pushed); only the right stick / LB / RB change it; 0 = JPOG75 cone
+    float dinoStickSide     = 20.0f;   // [dino] stick_side_band (JPOG77): degrees from pure sideways that strafe (the rest of the front half walks straight)
+    float dinoStickHardTurn = 0.85f;   // [dino] stick_hard_turn (JPOG73): sideways push needed to turn the dino with the left stick
+    int   dinoBuildingBites = 5;       // [dino] building_bites (JPOG73): bites on the same building that wreck it (0 = buildings can't be bitten)
+    float dinoBiteExtra     = 2.0f;    // [dino] bite_extra (JPOG73): extra metres of bite reach beyond the victim's edge
+    bool  p2PointerFovHorizontal = false;   // [pc2ptr] fov_horizontal (JPOG73): player 2 pointer pick ray - the camera FOV is horizontal (1) or vertical (0)
+    float p2PointerFovScale = 1.0f;          // [pc2ptr] fov_scale (JPOG73): pick ray correction if clicks land too far out (<1) / in (>1)
+    bool  vehicleHidePointer = true;   // [vehicle] hide_pointer (JPOG73 rev d): no mouse pointer while a pad flies / drives
+    bool  p2GameArt         = true;    // [pc2ptr] game_art (JPOG73 rev b): player 2 pointer + toolbar with the game's own pictures (0 = simple drawing)
+    bool  particleGuard     = true;    // [display] particle_guard (JPOG73): skip a faulting particle update instead of crashing (twister)
+    bool  p2Repair          = true;    // [coop] p2_repair (JPOG73): Y (keyboard M) in player 2's damaged building window = repair
+    bool  heliPresser       = true;    // [vehicle] heli_presser (JPOG76): the player who presses RB + D-pad Up on a helicopter / helipad gets it (HUD handed over first); 0 = JPOG75 (HUD player only)
+    bool  heliPadFly        = true;    // [vehicle] heli_pad_fly (JPOG73): RB + D-pad Up on a selected helicopter / helipad = the game's fly order
+    bool  dinoZzzHint       = true;    // [dino] zzz_hint_fallback (JPOG73): no game icon for a player's sleeping dino -> "Zzz" hint in their half
+    bool  dinoEatPeople     = true;    // [dino] eat_people (JPOG73): big carnivore bite (RT) next to a guest / staff = the vanilla grab + swallow (GrabPpl.fsm)
+    bool  dinoLbTurn        = true;    // [dino] lb_turn (JPOG73): LB held = turn left (mirror of RB), sleep moves to R3 (right stick click); 0 = LB sleep
     float dinoRbTurnSign    = 1.0f;    // [dino] rb_turn_invert = 1 -> RB turns left (test switch)
     bool  dinoStepByFacing  = true;    // [dino] step_by_facing (JPOG69 R6): side/back step chosen by the dino's facing, not the stick
     float dinoStepInvX      = 1.0f;    // [dino] step_invert_x (JPOG69 R6 test switch): 1 -> -1 = side-steps go the other way

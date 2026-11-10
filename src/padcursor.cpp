@@ -220,6 +220,24 @@ bool Move(Cursor& c, int dx, int dy) {
     return true;
 }
 
+bool HoverAt(Cursor& c, int gx, int gy) {
+    if (!c.root || !g_apiOk) return false;
+    void* list[96]; int n = 0;
+    if (!GUARDED("padcursor collect (pointer)", { n = Collect(c.root, list, 0, 96, 0); })) return false;
+    void* best = nullptr; long bestA = 0x7FFFFFFF;
+    for (int i = 0; i < n; ++i) {
+        int x, y; AbsPos(list[i], x, y);
+        const int w = F<short>(list[i], 0x70), h = F<short>(list[i], 0x72);
+        if (gx < x || gy < y || gx >= x + w || gy >= y + h) continue;
+        const long a = (long)w * h;                          // the smallest widget under the pointer wins
+        if (a < bestA) { bestA = a; best = list[i]; }
+    }
+    if (!best) return false;
+    if (best != c.cur && c.logs < 8) { ++c.logs; LOG("padcursor: %s - pointer over %p (GUI %d,%d)", c.who, best, gx, gy); }
+    Highlight(c, best);
+    return true;
+}
+
 bool Click(Cursor& c) {
     if (!c.root || !g_apiOk) return false;
     Refresh(c);

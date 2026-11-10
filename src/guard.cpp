@@ -2,6 +2,7 @@
 #include <psapi.h>
 #include "guard.h"
 #include "log.h"
+#include "config.h"
 
 namespace {
     // JPOG34: a small stack of jump buffers per thread, so GUARDED() may nest (JPOG33 had ONE buffer: an inner
@@ -22,8 +23,28 @@ namespace {
         (void)n;
     }
 
+    // JPOG78 (owner crash 2026-11-10 17:12:28, CRASH fmod.dll+0x22995 data 000001DC, on FMOD's own stream thread): the
+    // stream update loop (fmod 0x2297A, called by the stream thread at 0x23455) walks the stream list at
+    // [0x100399C0]+0x1538 and met a NULL link (cmp byte [esi+0x1DC],0 with esi = 0) - the list was being changed by the
+    // game thread at the same moment (FMOD 3 race; the mod never touches FMOD streams). Recovery: on exactly that
+    // instruction with esi = 0, continue at 0x22AEA (pop edi / pop ebx / pop esi / leave / ret = the loop's normal end);
+    // the next stream tick walks the list again. [general] fmod_stream_guard = 0 = off.
+    LONG FmodStreamGuard(EXCEPTION_POINTERS* ep) {
+        static HMODULE s_fm = nullptr; static int s_logs = 0;
+        if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || !config::Get().fmodStreamGuard) return 0;
+        if (!s_fm) s_fm = GetModuleHandleA("fmod.dll");
+        if (!s_fm) return 0;
+        BYTE* at = (BYTE*)s_fm + 0x22995;
+        if ((BYTE*)ep->ExceptionRecord->ExceptionAddress != at || ep->ContextRecord->Esi >= 0x10000) return 0;
+        static const BYTE kCmp[7] = { 0x80, 0xBE, 0xDC, 0x01, 0x00, 0x00, 0x00 };
+        if (memcmp(at, kCmp, sizeof kCmp) != 0) return 0;
+        ep->ContextRecord->Eip = (DWORD)(uintptr_t)((BYTE*)s_fm + 0x22AEA);
+        if (s_logs < 20) { ++s_logs; LOG("guard: FMOD stream list had a NULL link (fmod.dll+0x22995, esi=%08lX) - stream update skipped this tick, no crash (JPOG78 [general] fmod_stream_guard)", ep->ContextRecord->Esi); }
+        return 1;
+    }
     LONG CALLBACK Veh(EXCEPTION_POINTERS* ep) {
         DWORD code = ep->ExceptionRecord->ExceptionCode;
+        if (FmodStreamGuard(ep)) return EXCEPTION_CONTINUE_EXECUTION;
         if (t_depth > 0 && (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_ILLEGAL_INSTRUCTION ||
                             code == EXCEPTION_PRIV_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO)) {
             char w[300]; Where(ep->ExceptionRecord->ExceptionAddress, w, sizeof w);

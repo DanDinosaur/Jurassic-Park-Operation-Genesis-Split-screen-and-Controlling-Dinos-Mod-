@@ -5,15 +5,18 @@
 #include <cstdio>
 #include <cstring>
 #include "p2menu.h"
+#include "kbm.h"
 #include "builder2.h"
 #include "xinput_pad.h"
 #include "config.h"
+#include "dinocontrol.h"
 #include "game.h"
 #include "gamectl.h"
 #include "splitscreen.h"
 #include "guard.h"
 #include "detour.h"
 #include "log.h"
+#include "stateguard.h"
 #include "padcursor.h"
 
 namespace p2menu {
@@ -233,7 +236,7 @@ namespace {
             sel ? ", back from a tool" : "");
         if (!g_hinted) {
             g_hinted = true;
-            if (gamectl::ShowHintNow(L"Player 2: push the stick at a picture, A = pick, B = back", 5.0f)) splitscreen::HintToHalf(who, 5.0f);
+            if (gamectl::ShowHintNow(dinocontrol::HintText(who, L"push the stick at a picture, A = pick, B = back", who == 1 ? L"click a picture, Esc = back" : L"click a picture to choose it"), 5.0f)) splitscreen::HintToHalf(who, 5.0f);   // JPOG78
         }
         return g_open;
     }
@@ -327,7 +330,7 @@ namespace {
         const int type = F<int>(sel, 0x40);
         Call("p2menu select", [&] { A.select(g_tree, nullptr); });  // the game's "select" sound
         if (!_stricmp(cmd, "Demolish") && gamectl::DemolishActive()) {
-            wchar_t t[120]; swprintf(t, 120, L"Player %d is using Demolish - only one player can demolish at a time", splitscreen::ActivePlayer() + 1);
+            wchar_t t[120]; gamectl::WFmt(t, 120, L"Player %d is using Demolish - only one player can demolish at a time", splitscreen::ActivePlayer() + 1);
             HintFor(who, t, 3.0f);
             LOG("p2menu: player %d wants Demolish - player %d is in demolish mode", who + 1, splitscreen::ActivePlayer() + 1);
             return;
@@ -380,6 +383,39 @@ namespace {
     constexpr uintptr_t kGetCachedDlg   = 0x0067CBA0;  // AGUISystem::GetCachedGameDialog(const TClass*), ret 4
     constexpr uintptr_t kGameDialogCls  = 0x008B5240;  // AGameDialog::m_sClass
     constexpr uintptr_t kDetachUnit     = 0x0057B020;  // AUnitDialog::DetachUnit() (JPOG60)
+    constexpr uintptr_t kBuildingDlgCls = 0x008B5060;  // AUnitBuildingDialog::m_sClass (GetClass 0x57A790) (JPOG72)
+
+    // JPOG72 safety net: Toshi::TGUIScreen::ChangeWidgetFocus(TGUIWidget*, bool) (TGuiInterface.dll, ret 8) reached with
+    // screen NULL (TGUIWidget::RequestFocus on a widget on no screen) = the 12:21:59 crash. Skip + log who called.
+    using fn_cwf = void(__fastcall*)(void* scr, void* edx, void* w, int b);
+    fn_cwf g_origCwf = nullptr;
+    int g_cwfLogs = 0;
+    void __fastcall Hook_ChangeWidgetFocus(void* scr, void* edx, void* w, int b) {
+        if (scr || !config::Get().guiFocusGuard) { g_origCwf(scr, edx, w, b); return; }
+        if (g_cwfLogs < 20) {
+            ++g_cwfLogs;
+            uintptr_t ra[8]{}; int n = 0;
+            uintptr_t* sp = reinterpret_cast<uintptr_t*>(__builtin_frame_address(0));
+            GUARDED("focus guard stack", {
+                for (int i = 0; i < 256 && n < 8; ++i) {
+                    const uintptr_t v = sp[i];
+                    if ((v >= 0x00401000 && v < 0x00739000) || (v >= 0x10001000 && v < 0x10030000)) ra[n++] = v;
+                }
+            });
+            LOG("guard: focus change to widget %p on NO screen skipped (would crash tguiinterface+0x13A71) - stack %08X %08X %08X %08X %08X %08X %08X %08X",
+                w, ra[0], ra[1], ra[2], ra[3], ra[4], ra[5], ra[6], ra[7]);
+        }
+    }
+    void InstallFocusGuard() {
+        static bool tried = false;
+        if (tried) return;
+        tried = true;
+        HMODULE m = GetModuleHandleA("TGuiInterface.dll");
+        void* t = m ? (void*)GetProcAddress(m, "?ChangeWidgetFocus@TGUIScreen@Toshi@@QAEXPAVTGUIWidget@2@_N@Z") : nullptr;
+        void* tramp = nullptr;
+        if (t && detour::Install(t, (void*)&Hook_ChangeWidgetFocus, &tramp)) g_origCwf = reinterpret_cast<fn_cwf>(tramp);
+        LOG("p2win: focus guard (ChangeWidgetFocus %p) %s", t, g_origCwf ? "on" : "FAILED");
+    }
     void* g_badUnits[8] = {};
     unsigned g_badNext = 0;
     using fn_activate = bool (__fastcall*)(void* sys, void* edx, void* dlg, int loc);
@@ -455,6 +491,7 @@ namespace {
     bool EnsureHook() {
         if (g_hookTried) return g_origActivate != nullptr;
         g_hookTried = true;
+        InstallFocusGuard();   // JPOG72
         void* tramp = nullptr;
         if (detour::Install(game::At(kActivateDialog), (void*)&Hook_ActivateDialog, &tramp)) g_origActivate = reinterpret_cast<fn_activate>(tramp);
         LOG("p2win: ActivateDialog hook %s", g_origActivate ? "on" : "FAILED - player 2's windows stay off");
@@ -554,7 +591,8 @@ namespace {
         if (config::Get().p2WindowPad) { padcursor::Begin(g_dlgCur, w, "player 2's window"); g_dlgRepeat = 0.0f; any = g_dlgCur.cur != nullptr; }
         // JPOG60: a window with nothing to press (e.g. the Performance report: its tab code is a stub on PC and the tab
         // panel is hidden in main.gui) just says how to close it.
-        HintFor(who, any ? L"Player 2: D-pad = pick a button, A = press it, B = close" : L"Player 2: B = close the window", 3.0f);
+        HintFor(who, dinocontrol::HintText(who, any ? L"D-pad = pick a button, A = press it, B = close" : L"B = close the window",
+                                          who == 1 ? L"click a button, Esc = close the window" : L"click a button to use it"), 3.0f);   // JPOG78: right player number + PC words
         return 1;
     }
 
@@ -564,6 +602,15 @@ namespace {
         if (g_dlgTick <= 0.0f) {
             g_dlgTick = 0.2f;
             void* d = g_dlg;
+            // JPOG72 (owner CRASH 12:21:59 tguiinterface+0x13A71 = TGUIScreen::ChangeWidgetFocus with screen NULL):
+            // AUnitBuildingDialog::OnUpdate 0x57A6C0 raises ShowMaintenancePopup (the modal "Repair?" AMessagePopupState on
+            // PLAYER 1's state chain) the first update after activation (flag +0x6C). It outlived player 2's window; pressing
+            // Repair then refocused a widget no longer on any screen. Player 2's window sets the flag first = no popup.
+            // OnDeactivate (our DlgClose) clears +0x6C again, so player 1's own window keeps the vanilla popup.
+            if (!config::Get().p2RepairPopup && gamectl::IsA(d, kBuildingDlgCls) && !F<uint8_t>(d, 0x6C)) {
+                F<uint8_t>(d, 0x6C) = 1;
+                LOG("p2win: player %d's building window %s - the \"Repair?\" popup skipped (JPOG72)", g_dlgWho + 1, g_dlgName);
+            }
             if (!GUARDED("p2win update", { VFn<fn_upd>(d, 0x20)(d, nullptr, 0.2f); })) { DlgClose("update faulted"); return; }
         }
         GUARDED("p2win reposition", { DlgReposition(); });
@@ -572,7 +619,7 @@ namespace {
     // JPOG59 (open list 1 / 3a): player 2's pad INSIDE their own window. The highlight is padcursor's (the widget's own
     // focused look, no screen focus); A = the widget's own press/release. Player 1's focus, input stack and focus grab
     // are restored around the click (Keep), like every p2menu call.
-    void WindowPad(int who, XPad& pad, float dt) {
+    void WindowPad(int who, XPad& pad, float dt, bool extClick = false) {
         float x = pad.LX(), y = -pad.LY();
         if (pad.Down(PAD_DLEFT)) x = -1; if (pad.Down(PAD_DRIGHT)) x = 1;
         if (pad.Down(PAD_DUP)) y = -1;   if (pad.Down(PAD_DDOWN)) y = 1;
@@ -586,7 +633,7 @@ namespace {
                 GUARDED("p2win pad move", { padcursor::Move(g_dlgCur, dx, dy); });
             }
         } else g_dlgRepeat = 0.0f;
-        if (!pad.Pressed(PAD_A)) { GUARDED("p2win refresh", { padcursor::Refresh(g_dlgCur); }); return; }
+        if (!pad.Pressed(PAD_A) && !extClick) { GUARDED("p2win refresh", { padcursor::Refresh(g_dlgCur); }); return; }
         void* sys = GuiSystem();
         void* sc = sys ? F(sys, 0x28) : nullptr;
         if (!sc) return;
@@ -594,7 +641,32 @@ namespace {
         Keep k(sc);
         const int grabs = F<int>(sc, 0x100);
         bool took = false;
+        // JPOG77 (owner JPOG76 16:33): a window button may change the game state (safari track, balloon track, turret,
+        // security camera ...) or - without the guard - unload the park. Watch the state and the unload count around
+        // the click; after an unload never touch the window again, after a state change close our window cleanly.
+        const long unl0 = splitscreen::UnloadCount();
+        void* st0 = gamectl::CurrentState();
+        stateguard::BeginClick(who);
         GUARDED("p2win pad click", { took = padcursor::Click(g_dlgCur); });
+        const int kept = stateguard::EndClick();
+        if (splitscreen::UnloadCount() != unl0) {
+            LOG("p2win: player %d's click on window %s UNLOADED the park - window dropped without touching it (JPOG77)", who + 1, g_dlgName);
+            g_dlg = nullptr; g_dlgCur = padcursor::Cursor{};
+            return;
+        }
+        void* st1 = gamectl::CurrentState();
+        if (st1 != st0 || kept) {
+            LOG("p2win: player %d's click on window %s changed the game state (vtbl %p -> %p, park state kept %d) - window closed, no more clicks on it (JPOG77)",
+                who + 1, g_dlgName, st0 ? *(void**)st0 : nullptr, st1 ? *(void**)st1 : nullptr, kept);
+            // focus left to the new mode (no k.Restore: it would take the focus back from the new state's screen)
+            DlgClose("its button started a new game mode");
+            const bool split = splitscreen::CanSwitch();
+            if (config::Get().stateGuardHud && split && splitscreen::ActivePlayer() != who) {
+                splitscreen::RequestActive(who);
+                LOG("p2win: player %d pressed it without the HUD -> HUD handed to player %d (the new mode is theirs, JPOG77 [coop] state_guard_handover)", who + 1, who + 1);
+            }
+            return;
+        }
         GUARDED("p2win restore player 1's focus", {
             if (F<int>(sc, 0x100) > grabs) LOG("p2win: focus grab left by the click (%d -> %d)", grabs, F<int>(sc, 0x100));
             k.Restore();
@@ -619,6 +691,7 @@ bool WindowOpen(int who) { return g_dlg && g_dlgWho == who; }   // JPOG59
 // attribute) gets its unit like AUnitInfoState's ctor does (dialog vfn +0x44 with the proxy, refcount +4 raised by the
 // caller), then is shown in player who's half with the JPOG53 window path (no state on the shared chain).
 int OpenUnitWindow(int who, void* unit) {
+    if (unit) dinocontrol::NoteWindowUnit(who, unit);   // JPOG76: RB + D-pad Up on a helipad window = that player flies
     if (!config::Get().p2Windows || !unit || !EnsureHook()) return 0;
     if (!LoadApi()) return 0;
     if (g_open) Close(who, "unit window");
@@ -685,7 +758,50 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
             g_winFromUnit = false;
             return true;
         }
-        if (config::Get().p2WindowPad && g_dlgCur.root) WindowPad(who, pad, dt);
+        // JPOG73 (owner #5): player 2 can repair. JPOG72 blocks the shared "Repair?" popup for player 2's building window
+        // (it crashed); instead, in a DAMAGED building's window Y (keyboard: M) = what the popup's "Repair" does
+        // (AUnitBuildingDialog::OnMaintenancePopupResponse 0x57A480): SetToFullHealth 0x4EE850 on the building's common
+        // component (GetCommonBuildingComponent 0x4C9170) and on its linked building (GetLinkedBuilding 0x4C5700).
+        // Cost: the dialog's +0x70 (set only by the popup) - 0 here, so player 2's repair is free (open item).
+        if (config::Get().p2Repair && g_dlg && gamectl::IsA(g_dlg, kBuildingDlgCls)) {
+            void* px = F(g_dlg, 0x68);
+            void* bld = px ? F(px, 0x14) : nullptr;
+            float ratio = 1.0f;
+            if (bld) GUARDED("p2 repair: health", {
+                void* comp = reinterpret_cast<void*(__fastcall*)(void*, void*)>(game::At(0x004C9170))(bld, nullptr);
+                if (comp) ratio = reinterpret_cast<float(__fastcall*)(void*, void*)>(game::At(0x004C0E80))(comp, nullptr); });
+            static void* s_hinted = nullptr;
+            if (ratio < 0.999f && s_hinted != g_dlg) {
+                s_hinted = g_dlg;
+                HintFor(who, kbm::IsKbm(who) ? L"Player 2: this building is damaged - press M to repair it" : L"Player 2: this building is damaged - press Y to repair it", 4.0f);
+            }
+            if (ratio < 0.999f && pad.Pressed(PAD_Y)) {
+                bool ok = GUARDED("p2 repair", {
+                    void* comp = reinterpret_cast<void*(__fastcall*)(void*, void*)>(game::At(0x004C9170))(bld, nullptr);
+                    if (comp) reinterpret_cast<void(__fastcall*)(void*, void*)>(game::At(0x004EE850))(comp, nullptr);
+                    void* lb = reinterpret_cast<void*(__fastcall*)(void*, void*)>(game::At(0x004C5700))(bld, nullptr);
+                    if (lb) if (void* c2 = reinterpret_cast<void*(__fastcall*)(void*, void*)>(game::At(0x004C9170))(lb, nullptr))
+                        reinterpret_cast<void(__fastcall*)(void*, void*)>(game::At(0x004EE850))(c2, nullptr); });
+                LOG("p2win: player %d REPAIRED building %p (health was %.0f%%) ok=%d", who + 1, bld, ratio * 100.0f, ok);
+                HintFor(who, L"Player 2: building repaired", 3.0f);
+                return true;
+            }
+        }
+        // JPOG73 (owner 14:28 priority): player 2's mouse pointer inside their window - the widget under the pointer is
+        // highlighted (the same highlight the pad uses), a left click presses it. Clicks beside every button do nothing.
+        bool mouseClick = false;
+        if (who == 1 && kbm::P2MenuPointer() && g_dlgCur.root) {
+            int gx = 0, gy = 0;
+            const bool click = kbm::P2TakeMenuClick();
+            if (splitscreen::PointerGui(1, gx, gy)) {
+                static int s_lx = -99999, s_ly = -99999;
+                bool over = false;
+                if (gx != s_lx || gy != s_ly || click) { s_lx = gx; s_ly = gy; GUARDED("p2win pointer hover", { over = padcursor::HoverAt(g_dlgCur, gx, gy); }); }
+                mouseClick = click && over;
+                if (click && !over) LOG("p2win: player 2 clicked beside every button (GUI %d,%d)", gx, gy);
+            }
+        }
+        if (config::Get().p2WindowPad && g_dlgCur.root) WindowPad(who, pad, dt, mouseClick);
         if (g_dlg) DlgUpdate(dt);
         return true;
     }
@@ -714,7 +830,31 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
         else Call("p2menu back", [&] { A.back(g_tree, nullptr); });
         return true;
     }
-    if (pad.Pressed(PAD_A)) { Pick(who); if (!g_open) return true; }
+    // JPOG73: player 2's mouse pointer on the disc - the picture in the pointer's direction from the disc's middle is
+    // highlighted (like the vanilla PC disc), a left click picks it (or opens the submenu).
+    bool discClick = false;
+    if (who == 1 && kbm::P2MenuPointer()) {
+        const bool click = kbm::P2TakeMenuClick();
+        void* d = CurrentDialog();
+        int gx = 0, gy = 0;
+        if (d && splitscreen::PointerGui(1, gx, gy)) {
+            const float cx = F<short>(d, 0x6C) + F<short>(d, 0x70) * 0.5f, cy = F<short>(d, 0x6E) + F<short>(d, 0x72) * 0.5f;
+            const float vx = gx - cx, vy = gy - cy, len = sqrtf(vx * vx + vy * vy);
+            const float rad = 0.5f * (F<short>(d, 0x70) < F<short>(d, 0x72) ? F<short>(d, 0x70) : F<short>(d, 0x72));
+            static int s_lx = -99999, s_ly = -99999;
+            if ((gx != s_lx || gy != s_ly) && len > rad * 0.15f) {
+                s_lx = gx; s_ly = gy;
+                if (IsDisc(d)) Point(vx / len, config::Get().p2DiscStickY * (-vy) / len);
+                else if (vy < -rad * 0.6f || vy > rad * 0.6f) {   // list menu: pointer above / below the middle = up / down
+                    g_repeat -= dt;
+                    if (g_repeat <= 0.0f) { g_repeat = 0.25f; const int dir = vy < 0 ? -1 : 1; Call("p2menu scroll (pointer)", [&] { A.scroll(g_tree, nullptr, dir); }); }
+                }
+            }
+            discClick = click && len < rad * 2.2f;
+            if (click && !discClick) LOG("p2menu: player 2 clicked outside the disc (GUI %d,%d, %.0f from its middle)", gx, gy, len);
+        }
+    }
+    if (pad.Pressed(PAD_A) || discClick) { Pick(who); if (!g_open) return true; }
     if (pad.Pressed(PAD_RB)) Call("p2menu next", [&] { A.scroll(g_tree, nullptr, 1); });
     if (pad.Pressed(PAD_LB)) Call("p2menu prev", [&] { A.scroll(g_tree, nullptr, -1); });
     if (!g_open) return true;

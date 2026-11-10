@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <cstring>
 #include "extras.h"
+#include "kbm.h"
 
 namespace {
     HMODULE g_real = nullptr;
@@ -47,10 +48,12 @@ extern "C" {
 __declspec(dllexport) HRESULT WINAPI
 DirectInput8Create(HINSTANCE hinst, DWORD ver, REFIID riid, LPVOID* out, void* outer) {
     typedef HRESULT (WINAPI *P)(HINSTANCE, DWORD, REFIID, LPVOID*, void*);
-    LoadAsiPlugins();
     static P p = (P)Real("DirectInput8Create");
+    kbm::EarlyInstall(g_real);   // JPOG71: raw input / cursor hooks BEFORE the .asi plugins load, so their calls are seen too
+    LoadAsiPlugins();
     HRESULT hr = p ? p(hinst, ver, riid, out, outer) : E_FAIL;
     if (SUCCEEDED(hr) && out && *out) extras::OnDirectInput(*out);   // JPOG67: free keyboard
+    if (SUCCEEDED(hr) && out && *out) kbm::OnDirectInput(*out);      // JPOG70: keyboard mask fallback (chains after extras)
     return hr;
 }
 

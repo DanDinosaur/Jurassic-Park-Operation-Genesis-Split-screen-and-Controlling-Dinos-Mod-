@@ -1,20 +1,21 @@
-# Jurassic Park: Operation Genesis - Split-screen co-op & dinosaur riding mod (JPOG Co-op v2)
+# Jurassic Park: Operation Genesis - Split-screen co-op & dinosaur riding mod (JPOG Co-op v3)
 
 **Play JPOG (PC, 2003) like a console game: Xbox controller support, 2-player split-screen on one PC, and take control of any dinosaur to walk, fight, roar, eat and sleep.**
 
-## ⬇️ [Download the latest release](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/releases/latest) → `JPOG_Coop_v2.zip`
+## ⬇️ [Download the latest release](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/releases/latest) → `JPOG_Coop_v3.zip`
 
 ### Quick start
 1. **You need your own copy of Jurassic Park: Operation Genesis for PC.** No game files are included in this mod.
-2. Unzip `JPOG_Coop_v2.zip` anywhere and double-click **`install.bat`**. It finds the game by itself and asks once whether you want the "easy start".
+2. Unzip `JPOG_Coop_v3.zip` anywhere and double-click **`install.bat`**. It finds the game by itself and asks once whether you want the "easy start".
 3. Start the game with **`Launch JPOG.bat`**.
 4. **For split-screen, connect TWO controllers.** Load a park, then switch on the second controller. The screen splits after about 2 seconds.
 5. **To ride a dinosaur:** aim at it, press **A** to select it, then press **RB + D-pad Up** (keyboard: **T**). **B** (or T) lets go.
 
 ### Before you play - important
 - 🎮 **Built for Xbox (XInput) controllers, NOT keyboard and mouse.** Keyboard and mouse still work like the original game, but the
-  mod's features are made for controllers. **Player 2 must use a controller.** PlayStation / Switch pads: use Steam Input.
-- 👥 **Split-screen only turns on when two controllers are connected.** With one controller you play alone.
+  mod's features are made for controllers. **Player 2 uses a second controller, or their own second keyboard + mouse
+  (Shift+F8 on that keyboard).** PlayStation / Switch pads: use Steam Input.
+- 👥 **Split-screen turns on when two controllers are connected** (or when player 2 joins on their own keyboard + mouse). With one controller you play alone.
 - ↩️ To remove the mod, run **`uninstall.bat`**. It restores every game file the installer changed (they are backed up as `*.prejpogmod.bak`).
 - 🐞 Problems? Open an [issue](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/issues) and attach `jpogmod.log` from your game folder.
 
@@ -41,7 +42,13 @@ This mod was designed and tested for **Xbox controllers (XInput)**. The keyboard
 original game does, and a few keyboard keys were added for riding dinosaurs. But many parts of the mod
 (split-screen, player 2, menus, dinosaur riding) are built around controllers and work best with them.
 
-- **Player 2 is controller only.** The game has only one mouse cursor and one keyboard, and they always belong to player 1.
+- **Player 2 on keyboard + mouse (new in v3):** plug in a SECOND keyboard and mouse and press **Shift+F8** on that keyboard,
+  then click with that mouse. Player 2 gets their own pointer and their own round toolbar (Build / Manager / Dinosaurs /
+  Actions / Options + mail) in their half, with the game's normal PC keys (WASD / arrows camera, B build, F1-F5, M mail,
+  Esc back, G = Dinosaurs menu, Space / C = Actions). **F8** on a keyboard switches that player between controller and
+  keyboard + mouse. Riding on keyboard: **T** takes control / lets go, WASD move, mouse = camera, left click bites, middle
+  click pounces. Player 1's own keyboard and mouse keep working like the original game.
+  On-screen hints follow each player's input: a keyboard + mouse player sees keys ("press T"), a controller player sees buttons.
 - **No controller connected** = the game plays like the normal PC game (free mouse, PC menus). The mod switches back to
   controller style by itself when you connect one.
 - PlayStation / Switch controllers: use them through **Steam Input** or another XInput translator.
@@ -91,7 +98,8 @@ off while that file is in the game folder. Rename it to `JPOGMouseFix.asi.off` t
 - When one player rides a dinosaur, the other player gets the game HUD automatically.
 - If both players want the same one-of-a-kind thing (the same window, or demolish mode), the game says
   "Player N is using X - only one player at a time".
-- (F11 forces split-screen on or off for testing, but player 2 can only play with a controller.)
+- (F11 forces split-screen on or off for testing.)
+- Player 2 can also play on their own keyboard + mouse: **Shift+F8** on the second keyboard (see "Made for controllers").
 
 ---
 
@@ -139,7 +147,7 @@ until you move the stick), then **RB + D-pad Up** takes control.
 
 | Controller | Keyboard (player 1) | Action |
 |---|---|---|
-| Left stick | I / K / J / L | walk (the dinosaur turns to where the camera looks) / step back / step sideways |
+| Left stick | I / K / J / L | up (or anywhere in the top half) = walk straight where the camera looks, the heading stays put until you turn with the right stick / LB / RB; full left / right = side-step; down = step back. Turn with RB / LB / right stick |
 | Left-stick click | Right Shift | run on / off |
 | Right stick | Numpad 4 / 6 / 8 / 2 (playing alone: Q / E / R / F) | camera |
 | D-pad Up / Down | Numpad + / - | zoom in / out |
@@ -151,7 +159,8 @@ until you move the stick), then **RB + D-pad Up** takes control.
 | Y | Y | roar (hold = second call) |
 | X | N | eat (big carnivores next to a goat or cow: grab and swallow) |
 | A | G | drink (next to water) |
-| LB | Z | lie down and sleep |
+| LB (hold) | - | turn left on the spot |
+| Right-stick click | Z | lie down and sleep |
 | B | T | let go |
 
 Riding ends by itself if the dinosaur dies, you leave the park, or split-screen ends. Nobody can take a dinosaur the
@@ -160,6 +169,10 @@ other player is riding. Both players can ride at the same time, and each gets th
 ## Vehicles and mini games
 
 Ranger helicopter and jeeps: the sticks fly, drive and aim. **RT** = fire, **LT** = the right mouse button action.
+To fly the helicopter with a controller: select the helicopter (or open its helipad's window) and press **RB + D-pad Up**.
+In split-screen the player who presses gets it (the game HUD moves to them).
+Building buttons that start a mode of their own (lay a safari or balloon track, ride photos, turret, security camera) work
+from either player's window in split-screen: whoever presses the button gets that mode (the HUD moves to them).
 
 ## Keyboard keys added by the mod
 
@@ -167,6 +180,8 @@ Ranger helicopter and jeeps: the sticks fly, drive and aim. **RT** = fire, **LT*
 |---|---|
 | T | take control of the selected dinosaur / let go |
 | I J K L, Right Shift, U H O Y N G Z, Numpad 2 4 6 8 + - | riding (see the riding table) |
+| F8 | switch this keyboard's player between controller and keyboard + mouse |
+| Shift+F8 | on a second keyboard: player 2 joins on keyboard + mouse |
 | F11 | force split-screen on / off (testing) |
 | F12 | split vertical ↔ horizontal |
 
@@ -180,22 +195,29 @@ All of the mod's keys can be changed in `jpogmod.ini` → `[keys]`.
 Every setting is explained by a comment in the file. Useful ones:
 
 - `[controller]`: `console_mode` (1 = controller style, 0 = PC style), `vibration`, `deadzone`, `window_spinners`
-- `[coop]`: `split_orientation`, `auto_split`, `zoom_out_mult`
+- `[coop]`: `split_orientation`, `auto_split`, `zoom_out_mult`, `p2_repair`
+- `[pc2]` / `[pc2ptr]` (new in v3): player 2 keyboard + mouse - `p1_input` / `p2_input`, the join key, pointer, toolbar
+  (`hud_buttons`, `hud_scale`), `fov_horizontal` / `fov_scale` if the pointer picks beside the target
 - `[dino]`: `a_takes_control` (1 = A takes control at once instead of RB + D-pad Up), `select_hint`, `attack_range`, `run_mult`,
-  `rb_turn` / `rb_turn_speed`, `fence_break` / `fence_bites`, camera options
+  `rb_turn` / `rb_turn_speed`, `lb_turn`, `fence_break` / `fence_bites`, `building_bites`, `eat_people`, camera options,
+  `stick_lock` (1 = the walk heading is locked when you push forward; only the right stick / LB / RB turn) / `stick_side_band`, `stick_cone` / `stick_hard_turn` (used when stick_lock = 0)
+- `[coop]`: `state_guard` (1 = building buttons can never unload the park - crash fix), `state_guard_handover` (the presser gets the new mode)
+- `[vehicle]`: `heli_pad_fly` (RB + D-pad Up flies the helicopter), `heli_presser` (the presser gets it), `hide_pointer`
 - `[hud]` / `[display]` / `[mouse]` / `[camera]`: widescreen, HUD size in split-screen, Alt+F4, borderless, mouse speed, camera smoothing
 - `[unlocks]`: easy start on / off (`all_research`, `all_dig_sites`, `mr_dna` = every species in the hatchery, `infinite_money`, ...)
 - `[keys]`: the keyboard keys above
-- `[general]`: `log` - the mod writes `jpogmod.log` in the game folder. Include it when you report a bug.
+- `[general]`: `fmod_stream_guard` (1 = survive a rare crash in the game's sound library), `log` - the mod writes `jpogmod.log` in the game folder. Include it when you report a bug.
 
 ---
 
 ## Known limits
 
 - Another widescreen plugin (`JPOGMouseFix.asi`) in the game folder switches the mod's own widescreen off (see "Widescreen").
-- Player 2 has no keyboard or mouse controls.
+- Player 2 on keyboard + mouse needs a second physical keyboard AND mouse (tested on Windows 11 with a laptop keyboard +
+  touchpad for player 1 and a USB keyboard + Bluetooth mouse for player 2).
 - Some game windows exist only once in the game (for example the Start menu and full-screen reports), so only one player
   can have them open at a time.
+- The safari jeep ride with a controller has not been fully tested yet - reports welcome.
 - Built and tested on one setup (ROG Ally + TV, 1920x1080, Windows 11). Please report problems with your `jpogmod.log`.
 
 ## Building from source

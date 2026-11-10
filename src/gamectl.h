@@ -41,6 +41,10 @@ namespace gamectl {
     // JPOG39: console style on a screen where no widget has the focus (or the fossil-hunt map) = pad drives a pointer.
     bool  CursorFallback();
     void  RequestHint(const wchar_t* text, float seconds);
+    // JPOG79: a hint for ONE player - shown in that player's half in split-screen (p < 0 = the HUD half, as RequestHint).
+    void  RequestHintFor(int p, const wchar_t* text, float seconds);
+    // JPOG79: safe wide formatter (llvm-mingw ucrt swprintf printed garbage for %ls in JPOG78). Supports %d %ls %hs %%.
+    void  WFmt(wchar_t* out, size_t n, const wchar_t* fmt, ...);
     // JPOG46 (backlog 5): a building / gate placement tool is open; D-pad Left/Right rotate it (game's own commands).
     bool  PlacementRotate();
     void  RequestRotate(int dir);    // -1 / +1, applied on the game thread

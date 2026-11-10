@@ -8,6 +8,8 @@
 #include "config.h"
 #include "log.h"
 #include "input_map.h"
+#include "splitscreen.h"
+#include <cstdarg>
 
 namespace {
     constexpr uintptr_t kRootPtr            = 0x008B859C;  // AApplication(0x8B8580)+0x1C
@@ -160,6 +162,29 @@ void RequestMenu(int menu) { InterlockedExchange(&g_menuReq, menu); }
 
 bool PlacementRotate() { return g_placeRot != 0; }
 void RequestRotate(int dir) { InterlockedExchange(&g_rotReq, dir > 0 ? 1 : -1); }
+void RequestHintFor(int p, const wchar_t* text, float seconds) {
+    RequestHint(text, seconds);
+    if (p >= 0 && splitscreen::Active()) splitscreen::HintToHalf(p, seconds);
+}
+void WFmt(wchar_t* out, size_t n, const wchar_t* fmt, ...) {
+    if (!out || !n) return;
+    size_t o = 0;
+    auto put = [&](wchar_t c) { if (o + 1 < n) out[o++] = c; };
+    va_list ap; va_start(ap, fmt);
+    for (const wchar_t* f = fmt; f && *f; ++f) {
+        if (*f != L'%') { put(*f); continue; }
+        ++f;
+        if (*f == L'%') { put(L'%'); continue; }
+        if (*f == L'd') { int v = va_arg(ap, int); wchar_t b[16]; int k = 0; unsigned u = v < 0 ? 0u - (unsigned)v : (unsigned)v;
+                          do { b[k++] = (wchar_t)(L'0' + u % 10); u /= 10; } while (u && k < 15); if (v < 0) put(L'-'); while (k) put(b[--k]); continue; }
+        if (*f == L'l' && f[1] == L's') { ++f; const wchar_t* s = va_arg(ap, const wchar_t*); for (; s && *s; ++s) put(*s); continue; }
+        if (*f == L'h' && f[1] == L's') { ++f; const char* s = va_arg(ap, const char*); for (; s && *s; ++s) put((wchar_t)(unsigned char)*s); continue; }
+        if (!*f) break;
+        put(L'%'); put(*f);   // unknown: copied as it is
+    }
+    va_end(ap);
+    out[o] = 0;
+}
 void RequestHint(const wchar_t* text, float seconds) {
     InitCs();
     EnterCriticalSection(&g_cs);
@@ -314,7 +339,7 @@ void Tick() {
         secs = g_hintSecs;
         LeaveCriticalSection(&g_cs);
         bool ok = ShowHintNow(text, secs);
-        if (g_hintLogs < 20) { ++g_hintLogs; LOG("hint: %ls (ok=%d)", text, ok); }
+        if (g_hintLogs < 80) { ++g_hintLogs; LOG("hint: %ls (ok=%d)", text, ok); }
     }
 }
 

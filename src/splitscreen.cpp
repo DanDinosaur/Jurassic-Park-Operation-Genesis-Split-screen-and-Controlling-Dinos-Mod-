@@ -17,6 +17,7 @@
 #include <cstring>
 #include <cmath>
 #include "splitscreen.h"
+#include "kbm.h"
 #include "ridehud.h"
 #include "builder2.h"
 #include "p2menu.h"
@@ -31,7 +32,10 @@
 #include "minipad.h"
 #include "gamectl.h"
 #include "detour.h"
+#include "p2art.h"
+#include "partguard.h"
 #include "widescreen.h"
+#include "stateguard.h"
 
 namespace {
     // ---- TRenderInterface.dll exports (thiscall -> __fastcall with dummy EDX) ----
@@ -66,6 +70,7 @@ namespace {
     float g_p2[16];              // player 2 camera matrix (rows: right, up, fwd, pos - verified by log)
     XPad  g_pad2(1);
     unsigned g_frame = 0, g_parkFrame = 0;
+    float g_ptrGround[3]{}; bool g_ptrGroundOk = false; unsigned g_ptrGroundFrame = ~0u;   // JPOG73: ground under player 2's pointer
     void* g_park = nullptr;
     bool  g_prevF11 = false, g_prevF12 = false;
     unsigned g_renderLogs = 0;
@@ -82,12 +87,24 @@ namespace {
     fn_isTog  pIsToggled = nullptr;
     fn_bool0  g_origOptActivate = nullptr, g_origOptDeactivate = nullptr;
     void*     g_splitWidget = nullptr;
+    void*     g_inputWidget[2] = { nullptr, nullptr };   // JPOG70: "Player N: Controller / Keyboard + Mouse"
     void SetOrientation(bool vertical, const char* why);
 
     void PollOptionsToggle() {
-        if (!g_splitWidget || !pIsToggled) return;
-        bool v = pIsToggled(g_splitWidget, nullptr);
-        if (v != g_vertical) SetOrientation(v, "options menu");
+        if (!pIsToggled) return;
+        if (g_splitWidget) {
+            bool v = pIsToggled(g_splitWidget, nullptr);
+            if (v != g_vertical) SetOrientation(v, "options menu");
+        }
+        for (int p = 0; p < 2; ++p) {
+            void* w = g_inputWidget[p];
+            if (!w) continue;
+            const bool v = pIsToggled(w, nullptr);
+            if (v != kbm::IsKbm(p)) {
+                kbm::SetKbm(p, v, "options menu");
+                if (kbm::IsKbm(p) != v && pSetToggled) pSetToggled(w, nullptr, kbm::IsKbm(p) ? 1 : 0);   // refused: show the real mode
+            }
+        }
     }
     bool __fastcall Opt_OnActivate(void* self, void* edx) {
         LOG("split: options OnActivate %p -> original", self);
@@ -102,12 +119,20 @@ namespace {
         LOG("split: toggle widget %p (ok=%d)", w, ok);
         if (w) ok = GUARDED("SetToggled", { pSetToggled(w, nullptr, g_vertical ? 1 : 0); });
         if (w && ok) g_splitWidget = w;
-        LOG("split: options menu opened (toggle set %d)", g_vertical);
+        // JPOG70: the two "Player N controls" toggles (installer adds them to main.gui; missing = skipped)
+        static const char* names[2] = { "JPOGModP1Input", "JPOGModP2Input" };
+        for (int p = 0; p < 2; ++p) {
+            void* iw = nullptr;
+            bool ok2 = GUARDED("FindNamedChild JPOGModPnInput", { if (gui) iw = pFindNamedChild(gui, nullptr, names[p]); });
+            if (iw && ok2) ok2 = GUARDED("SetToggled input", { pSetToggled(iw, nullptr, kbm::IsKbm(p) ? 1 : 0); });
+            g_inputWidget[p] = (iw && ok2) ? iw : nullptr;
+        }
+        LOG("split: options menu opened (toggle set %d; player controls toggles %p %p)", g_vertical, g_inputWidget[0], g_inputWidget[1]);
         return r;
     }
     bool __fastcall Opt_OnDeactivate(void* self, void* edx) {
         PollOptionsToggle();
-        g_splitWidget = nullptr;
+        g_splitWidget = nullptr; g_inputWidget[0] = g_inputWidget[1] = nullptr;
         return g_origOptDeactivate(self, edx);
     }
     bool PatchVtable(uintptr_t vt, int slot, void* fn, void** orig) {
@@ -425,8 +450,13 @@ namespace {
     // ([dino] zzz_always) the node is drawn as fully shown: flags |= 0x11, alpha (+0x20) = 1 - what UpdateIcons sets for
     // a shown icon. Position and icon type (+0x14/+0x18/+0x1C) are UpdateIcons' own for this frame.
     int g_zzzLogs = 0;
+    // JPOG73 (owner 13:56: "player 2 gets no sleep bubble"): log per player whether their sleeping dino has an icon node
+    // at all; none for 2 s -> the "Zzz" goes into that player's half as a hint instead ([dino] zzz_hint_fallback).
+    DWORD g_zzzMissSince[2] = { 0, 0 }, g_zzzHintT[2] = { 0, 0 }; int g_zzzMissLogs[2] = { 0, 0 }, g_zzzFoundLogs[2] = { 0, 0 };
     void ForceZzzIcons() {
         if (!config::Get().dinoZzzAlways) return;
+        void* want[2] = { dinocontrol::ZzzDino(0), dinocontrol::ZzzDino(1) };
+        bool found[2] = { false, false };
         GUARDED("zzz icon", {
             uint8_t* head = (uint8_t*)game::At(0x008B7D70);
             int n = 0;
@@ -434,11 +464,28 @@ namespace {
                 void* px = *(void**)(nd + 0xC);
                 void* unit = px ? *(void**)((uint8_t*)px + 0x14) : nullptr;
                 if (!unit || !dinocontrol::IsZzzUnit(unit)) continue;
+                for (int p = 0; p < 2; ++p) if (unit == want[p]) {
+                    found[p] = true;
+                    if (g_zzzFoundLogs[p] < 2) { ++g_zzzFoundLogs[p]; LOG("dino: P%d sleep icon node found (type %d, flags 0x%X, unit rendered %d)", p + 1,
+                        *(int*)(nd + 0x1C), *(uint32_t*)(nd + 0x10), (*(uint32_t*)((uint8_t*)unit + 0x14) & 0x100) != 0); }
+                }
                 *(uint32_t*)(nd + 0x10) |= 0x11; *(float*)(nd + 0x20) = 1.0f;
                 if (g_zzzLogs < 2) { ++g_zzzLogs; LOG("dino: sleep icon of the player's dino shown (icon type %d at GUI %d,%d)",
                     *(int*)(nd + 0x1C), *(int*)(nd + 0x14), *(int*)(nd + 0x18)); }
             }
         });
+        const DWORD now = GetTickCount();
+        for (int p = 0; p < 2; ++p) {
+            if (!want[p] || found[p]) { g_zzzMissSince[p] = 0; continue; }
+            if (!g_zzzMissSince[p]) { g_zzzMissSince[p] = now | 1; continue; }
+            if (now - g_zzzMissSince[p] < 2000) continue;
+            if (g_zzzMissLogs[p] < 3) { ++g_zzzMissLogs[p]; LOG("dino: P%d's sleeping dino %p has NO icon node in the game's list - Zzz hint in their half instead", p + 1, want[p]); }
+            if (config::Get().dinoZzzHint && g_active && now - g_zzzHintT[p] > 2500) {
+                g_zzzHintT[p] = now;
+                gamectl::RequestHint(L"Zzz... (your dinosaur is asleep)", 3.0f);
+                splitscreen::HintToHalf(p, 3.0f);
+            }
+        }
     }
     // Re-project every icon node with the render-context values A/B (one half's own pass), shifted by gx,gy GUI units.
     // Saves the original node positions into saved[] (n). JPOG40 for the other half; JPOG62 also for the HUD half.
@@ -820,9 +867,12 @@ namespace {
     void QueueCircle(int who, bool hudHalf) {
         const Config& c = config::Get();
         g_circleQueued = false;
-        if (g_circleOff || g_circleHeld || !c.aimCircle || !input_map::ConsoleActive() || !WorldReady()) return;
+        if (g_circleOff || g_circleHeld || !c.aimCircle || (!input_map::ConsoleActive() && !(who == 1 && kbm::P2WorldPointer())) || !WorldReady()) return;
         float pt[3]; bool have = false;
         if (hudHalf) { if (g_hudAimOk) { memcpy(pt, g_hudAim, sizeof pt); have = true; } }
+        else if (who == 1 && g_ptrGroundOk && g_frame - g_ptrGroundFrame <= 2 && kbm::P2WorldPointer()) {   // JPOG73: circle under player 2's pointer
+            memcpy(pt, g_ptrGround, sizeof pt); have = true;
+        }
         else if (g_active && !dinocontrol::Controls(who) && !builder2::Open(who) && gamectl::InPark()) {
             void* camObj = who ? g_cam2 : g_cam1;
             if (camObj) {
@@ -915,6 +965,11 @@ namespace {
         ZoomCamera(c);
         // JPOG46 (backlog 1): X = this player's own build tool (buildings), at the same time as the HUD player.
         // JPOG49: X = this player's own copy of the game's build disc (p2menu); its items open builder2's tools.
+        // JPOG76: RB + D-pad Up with this player's own helipad / helicopter window open = THIS player flies (HUD handed over).
+        if (p2menu::WindowOpen(who) && pad.Down(PAD_RB) && pad.Pressed(PAD_DUP) && dinocontrol::HeliPressFromWindow(who)) {
+            p2menu::Close(who, "flies the helicopter");
+            return;
+        }
         const bool menuUsed = p2menu::Update(who, pad, c, dt);   // true = the disc used this frame's buttons
         const bool menu = p2menu::IsOpen(who);
         const bool building = menuUsed || menu || builder2::Update(who, pad, c, dt) || builder2::Open(who);
@@ -925,11 +980,12 @@ namespace {
             float t[3]{};
             bool okT = GUARDED("free player's aim point (info)", {
                 reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(0x0050C770))(c, nullptr, t); });
+            if (who == 1 && g_ptrGroundOk && kbm::P2WorldPointer()) { memcpy(t, g_ptrGround, sizeof t); okT = true; }   // JPOG73: at player 2's pointer
             void* u = okT ? dinocontrol::NearestUnitOf(t, cf0.pickRadius, 0x008B78C0) : nullptr;
             if (!u && okT) u = dinocontrol::NearestUnitOf(t, cf0.pickRadius + 10.0f, 0x008B7A60);
             LOG("split: player %d (no HUD) RB + D-pad Up - info window for unit %p near (%.1f %.1f %.1f)", who + 1, u, t[0], t[1], t[2]);
             if (u) p2menu::OpenUnitWindow(who, u);
-            else gamectl::RequestHint(who ? L"Player 2: aim at a dinosaur or building, then RB + D-pad Up" : L"Player 1: aim at a dinosaur or building, then RB + D-pad Up", 3.0f);
+            else gamectl::RequestHintFor(who, dinocontrol::HintText(who, L"aim at a dinosaur or building, then RB + D-pad Up", L"point at a dinosaur or building, then press %ls"), 3.0f);   // JPOG78
             return;
         }
         // JPOG63 (owner 13:40 "go back to the old method"): with [dino] a_takes_control = 0, A no longer takes a dino -
@@ -939,6 +995,7 @@ namespace {
             float t[3]{};
             bool okT = GUARDED("free player's aim point", {
                 reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(0x0050C770))(c, nullptr, t); });
+            if (who == 1 && g_ptrGroundOk && kbm::P2WorldPointer()) { memcpy(t, g_ptrGround, sizeof t); okT = true; }   // JPOG73: at player 2's pointer
             LOG("split: player %d (no HUD) pressed %s - pick a dino near (%.1f %.1f %.1f) ok=%d", who + 1,
                 pad.Pressed(PAD_A) ? "A" : "RB + D-pad Up", t[0], t[1], t[2], okT);
             // JPOG59 (open list 2 / 6c): no dino at the aim -> the nearest building's own window in this player's half
@@ -1182,6 +1239,143 @@ namespace {
         uint32_t& f = *reinterpret_cast<uint32_t*>(rc + 0x08);
         f = (f & 0xFFFFFF03u) | 0x101u;
     }
+    // ---- JPOG73 (owner, asked twice): player 2's OWN pointer + player 1's PC HUD buttons in player 2's half ----
+    // Only when player 2 plays with keyboard + mouse and the mouse is in pointer mode (kbm::P2PointerMode). Drawn with
+    // IDirect3DDevice8::Clear rect lists (vt 36) right after player 2's half was rendered (inside the scene, viewport =
+    // player 2's half - Clear clips to it), so no render states / textures are touched. Buttons: round discs in the
+    // HUD's colours with a simple picture (hard hat, newspaper, skull, hand, gear) + the mail envelope bottom-right.
+    // Pick ray: from player 2's camera matrix (the one their half is drawn with), forward = towards the camera's target
+    // point, through the pointer, onto the ground plane at the target's height (log once for checking).
+    struct D3DVP8 { DWORD X, Y, Width, Height; float MinZ, MaxZ; };
+    struct DRect { LONG x1, y1, x2, y2; };
+    struct RectList { DRect r[512]; int n = 0; DWORD col = 0; };
+    RectList g_rl[12];
+    int g_ovlFaults = 0, g_ovlLogs2 = 0, g_ptrRayLogs = 0;
+    void RlAdd(int li, DWORD col, float x1, float y1, float x2, float y2) {
+        RectList& L = g_rl[li]; L.col = col;
+        if (L.n >= 512 || x2 <= x1 || y2 <= y1) return;
+        L.r[L.n++] = { (LONG)x1, (LONG)y1, (LONG)x2, (LONG)y2 };
+    }
+    void RlDisc(int li, DWORD col, float cx, float cy, float rad) {   // filled circle as row spans
+        for (int dy = -(int)rad; dy <= (int)rad; ++dy) {
+            const float hw = sqrtf(rad * rad - (float)dy * dy);
+            RlAdd(li, col, cx - hw, cy + dy, cx + hw + 1, cy + dy + 1);
+        }
+    }
+    // 7x7 pictures, '#' = filled. Order = kbm::P2B_*.
+    const char* kPic[6][7] = {
+        { "  ###  ", " ##### ", "#######", "#######", "#######", "       ", "       " },   // Build: hard hat
+        { "#######", "#     #", "# ### #", "#     #", "# ### #", "#     #", "#######" },   // Manager: newspaper
+        { " ##### ", "#######", "## # ##", "#######", " ##### ", " # # # ", "       " },   // Dinosaurs: skull
+        { " # # # ", " # # # ", " ##### ", "#######", " ######", "  #### ", "       " },   // Actions: hand
+        { "# # # #", " ##### ", "##   ##", "##   ##", "##   ##", " ##### ", "# # # #" },   // Options: gear
+        { "#######", "##   ##", "# # # #", "#  #  #", "#     #", "#######", "       " },   // mail: envelope
+    };
+    const DWORD kBtnCol[6] = { 0xFFB08A3C, 0xFF8C8C80, 0xFF9C8A64, 0xFFA07850, 0xFFB02020, 0xFFD8D8D0 };
+    void DrawP2Overlay(void* dev, float hx, float hy, float hw, float hh) {
+        for (auto& L : g_rl) L.n = 0;
+        kbm::P2SetHalfAspect(hh > 1.0f ? hw / hh : 1.0f);
+        const int hover = kbm::P2HoverButton();
+        // JPOG73 rev b (owner 14:19): the game's own pictures (p2art); the simple drawing below only if they can't load
+        if (config::Get().p2GameArt) {
+            float ux, uy; kbm::P2Pointer(ux, uy);
+            void** vt0 = *reinterpret_cast<void***>(dev);
+            using fn_vp0 = long(__stdcall*)(void*, D3DVP8*);
+            D3DVP8 old0{}, half0{ (DWORD)hx, (DWORD)hy, (DWORD)hw, (DWORD)hh, 0.0f, 1.0f };
+            reinterpret_cast<fn_vp0>(vt0[41])(dev, &old0);
+            reinterpret_cast<fn_vp0>(vt0[40])(dev, &half0);
+            const bool drawn = p2art::Draw(dev, hx, hy, hw, hh, hover, ux, uy, true);
+            reinterpret_cast<fn_vp0>(vt0[40])(dev, &old0);
+            if (drawn) {
+                if (g_ovlLogs2 < 2) { ++g_ovlLogs2; LOG("p2ptr: player 2's pointer + toolbar drawn with the game's own pictures (half %.0f,%.0f %.0fx%.0f)", hx, hy, hw, hh); }
+                return;
+            }
+        }
+        for (int i = 0; i < kbm::P2B_COUNT; ++i) {
+            float a, b, c, d;
+            if (!kbm::P2ButtonRect(i, a, b, c, d)) continue;
+            const float cx = hx + (a + c) * 0.5f * hw, cy = hy + (b + d) * 0.5f * hh, r = (d - b) * 0.5f * hh;
+            RlDisc(0, 0xFF101010, cx, cy, r + 2.0f);                                  // dark rim
+            RlDisc(1, i == hover ? 0xFFFFF0A0 : 0xFF5A4A2A, cx, cy, r);              // ring (bright when hovered)
+            RlDisc(2 + i, kBtnCol[i], cx, cy, r * 0.82f);                            // face
+            const float px = r * 1.0f / 7.0f;                                        // picture: 7x7 in the face
+            for (int yy = 0; yy < 7; ++yy) for (int xx = 0; xx < 7; ++xx)
+                if (kPic[i][yy][xx] == '#') RlAdd(8, 0xFF201810, cx - 3.5f * px + xx * px, cy - 3.5f * px + yy * px, cx - 2.5f * px + xx * px, cy - 2.5f * px + yy * px);
+        }
+        float ux, uy; kbm::P2Pointer(ux, uy);
+        const float ox = hx + ux * hw, oy = hy + uy * hh, s = hh / 360.0f < 1.0f ? 1.0f : hh / 360.0f;
+        for (int r = 0; r < 16; ++r) {                                                // arrow: black outline, white fill
+            const float wdt = r < 11 ? (float)r + 1.0f : (r < 13 ? 3.0f : 2.0f), off = r < 11 ? 0.0f : 2.0f + (r - 11) * 0.6f;
+            RlAdd(9, 0xFF000000, ox + (off - 1) * s, oy + (r - 1) * s, ox + (off + wdt + 1) * s, oy + (r + 2) * s);
+        }
+        for (int r = 0; r < 15; ++r) {
+            const float wdt = r < 10 ? (float)r : (r < 12 ? 2.0f : 1.0f), off = r < 10 ? 0.5f : 2.5f + (r - 10) * 0.6f;
+            if (wdt > 0) RlAdd(10, 0xFFFFFFFF, ox + off * s, oy + r * s, ox + (off + wdt) * s, oy + (r + 1) * s);
+        }
+        void** vt = *reinterpret_cast<void***>(dev);
+        using fn_clear = long(__stdcall*)(void*, DWORD, const void*, DWORD, DWORD, float, DWORD);
+        using fn_vp    = long(__stdcall*)(void*, D3DVP8*);
+        D3DVP8 old{}, half{ (DWORD)hx, (DWORD)hy, (DWORD)hw, (DWORD)hh, 0.0f, 1.0f };
+        reinterpret_cast<fn_vp>(vt[41])(dev, &old);
+        reinterpret_cast<fn_vp>(vt[40])(dev, &half);
+        long hr = 0; int total = 0;
+        for (auto& L : g_rl) if (L.n) { hr |= reinterpret_cast<fn_clear>(vt[36])(dev, (DWORD)L.n, L.r, 1 /*TARGET*/, L.col, 1.0f, 0); total += L.n; }
+        reinterpret_cast<fn_vp>(vt[40])(dev, &old);
+        if (g_ovlLogs2 < 2) { ++g_ovlLogs2; LOG("p2ptr: player 2's pointer + HUD buttons drawn (%d rects, half %.0f,%.0f %.0fx%.0f, hr 0x%08lX)", total, hx, hy, hw, hh, (unsigned long)hr); }
+    }
+    void* D3DDev() {
+        static void* (__fastcall* getDev)(void*, void*) = nullptr;
+        if (!getDev) {
+            HMODULE rd = GetModuleHandleA("TRenderD3DInterface.dll");
+            if (rd) getDev = reinterpret_cast<void*(__fastcall*)(void*, void*)>(GetProcAddress(rd, "?GetD3DDevice@TRenderD3DInterface@Toshi@@QAEPAUIDirect3DDevice8@@XZ"));
+        }
+        return (getDev && pInterfaceVar && *pInterfaceVar) ? getDev(*pInterfaceVar, nullptr) : nullptr;
+    }
+    // Ground point under player 2's pointer. m = the camera matrix their half was drawn with (row 0 = screen right,
+    // row 1 = screen down, translation = camera position), fov = the FOV their half used.
+    void P2PointerGround(const float* m, float fov, float hw, float hh) {
+        g_ptrGroundOk = false;
+        float ux, uy;
+        if (!kbm::P2Pointer(ux, uy) || !g_cam2) return;
+        float t[3];
+        bool ok = GUARDED("p2 pointer target", { reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(0x0050C770))(g_cam2, nullptr, t); });
+        if (!ok || !std::isfinite(t[0])) return;
+        const float P[3] = { m[12], m[13], m[14] };
+        float f[3] = { t[0] - P[0], t[1] - P[1], t[2] - P[2] };
+        float fl = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]); if (fl < 1e-3f) return;
+        for (float& v : f) v /= fl;
+        float r[3] = { m[0], m[1], m[2] };
+        const float rd = r[0] * f[0] + r[1] * f[1] + r[2] * f[2];             // make right exactly perpendicular to forward
+        for (int i = 0; i < 3; ++i) r[i] -= rd * f[i];
+        float rl = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]); if (rl < 1e-4f) return;
+        for (float& v : r) v /= rl;
+        float d[3] = { f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0] };   // screen down
+        if (d[0] * m[4] + d[1] * m[5] + d[2] * m[6] < 0) for (float& v : d) v = -v;
+        float fv = fov > 3.2f ? fov * 0.0174533f : fov;                      // degrees -> radians if needed
+        if (!(fv > 0.1f && fv < 3.0f)) fv = 0.9f;
+        const Config& c = config::Get();
+        float tv, th;
+        if (c.p2PointerFovHorizontal) { th = tanf(fv * 0.5f) * c.p2PointerFovScale; tv = th * hh / hw; }
+        else                          { tv = tanf(fv * 0.5f) * c.p2PointerFovScale; th = tv * hw / hh; }
+        const float sx = (ux * 2.0f - 1.0f) * th, sy = (uy * 2.0f - 1.0f) * tv;
+        const float ray[3] = { f[0] + sx * r[0] + sy * d[0], f[1] + sx * r[1] + sy * d[1], f[2] + sx * r[2] + sy * d[2] };
+        if (fabsf(ray[1]) < 1e-4f) return;
+        const float k = (t[1] - P[1]) / ray[1];
+        if (k <= 0) return;
+        g_ptrGround[0] = P[0] + ray[0] * k; g_ptrGround[1] = t[1]; g_ptrGround[2] = P[2] + ray[2] * k;
+        g_ptrGroundOk = std::isfinite(g_ptrGround[0]) && std::isfinite(g_ptrGround[2]);
+        g_ptrGroundFrame = g_frame;
+        if (g_ptrRayLogs < 3 && g_ptrGroundOk) { ++g_ptrRayLogs; LOG("p2ptr: pointer %.2f,%.2f -> ground (%.1f %.1f %.1f), camera target (%.1f %.1f %.1f), fov %.3f (%s, scale %.2f)",
+            ux, uy, g_ptrGround[0], g_ptrGround[1], g_ptrGround[2], t[0], t[1], t[2], fov, c.p2PointerFovHorizontal ? "horizontal" : "vertical", c.p2PointerFovScale); }
+    }
+    void P2AfterPass(int who, const float* m2, float fov, float x, float y, float w, float h) {
+        if (who != 1 || g_ovlFaults >= 3 || !kbm::P2PointerMode()) { if (who == 1) g_ptrGroundOk = false; return; }
+        bool ok = GUARDED("p2 pointer overlay", {
+            if (kbm::P2WorldPointer()) P2PointerGround(m2, fov, w, h); else g_ptrGroundOk = false;
+            if (void* dev = D3DDev()) DrawP2Overlay(dev, x, y, w, h);
+        });
+        if (!ok && ++g_ovlFaults >= 3) LOG("p2ptr: overlay faulted 3x - player 2 pointer drawing off for this session");
+    }
     bool __fastcall Hook_Render(void* scene, void* edx) {
         // JPOG39: single screen - the aim circle for player 1 in the main scene pass (not the water reflection pass).
         if (!g_active && g_renderer && scene == g_mainScene && !InEnvMapPass()) {
@@ -1237,7 +1431,7 @@ namespace {
             if (isMain) cullfix::SetPass(other, Ptr(vp, 0x34));   // JPOG54: this pass's planes + the other half's test
             if (isMain) { builder2::QueueFootprint(other); QueueCircle(other, false); }   // JPOG39/46: queued right before this half's own pass
             r = pRender(scene, edx);
-            if (isMain) { builder2::AfterPass(other); CheckCircleConsumed(); }
+            if (isMain) { builder2::AfterPass(other); CheckCircleConsumed(); P2AfterPass(other, m2, fov2 ? fov2 : fov1, x, y, w, h); }   // JPOG73
             LogProj(isMain, other, x, y, w, h);
             if (isMain) {   // JPOG40: the other half's projection, for its unit icon pass (Hook_RenderIcons)
                 uint8_t* orc = (uint8_t*)Ptr(vp, 0x34);
@@ -1386,14 +1580,16 @@ namespace {
     // visible at the sides (owner photo, JPOG35). D3D8 Clear(0, NULL) clears the current VIEWPORT, so: full-size
     // viewport, clear the target to black, restore - for a few frames (every back buffer of the swap chain).
     volatile LONG g_clearFrames = 0; int g_clearLogs = 0;
-    struct D3DVP8 { DWORD X, Y, Width, Height; float MinZ, MaxZ; };
-    void ClearFullBackBuffer() {
-        if (!pInterfaceVar || !*pInterfaceVar || g_W < 16 || g_H < 16) return;
+    void ClearFullBackBuffer(bool frontEnd = false) {
+        if (!pInterfaceVar || !*pInterfaceVar) return;
+        if (!frontEnd && (g_W < 16 || g_H < 16)) return;
         static void* (__fastcall* getDev)(void*, void*) = nullptr;
+        static bool s_noDev = false, s_feFault = false;   // JPOG72: front end calls this every frame - never retry/log-spam
+        if (s_noDev || (frontEnd && s_feFault)) return;
         if (!getDev) {
             HMODULE rd = GetModuleHandleA("TRenderD3DInterface.dll");
             if (rd) getDev = reinterpret_cast<void*(__fastcall*)(void*, void*)>(GetProcAddress(rd, "?GetD3DDevice@TRenderD3DInterface@Toshi@@QAEPAUIDirect3DDevice8@@XZ"));
-            if (!getDev) { g_clearFrames = 0; LOG("split: GetD3DDevice export not found - no back-buffer clear"); return; }
+            if (!getDev) { s_noDev = true; g_clearFrames = 0; LOG("split: GetD3DDevice export not found - no back-buffer clear"); return; }
         }
         bool ok = GUARDED("clear full back buffer", {
             void* dev = getDev(*pInterfaceVar, nullptr);
@@ -1401,15 +1597,27 @@ namespace {
                 void** vt = *reinterpret_cast<void***>(dev);
                 using fn_clear = long(__stdcall*)(void*, DWORD, const void*, DWORD, DWORD, float, DWORD);
                 using fn_vp    = long(__stdcall*)(void*, D3DVP8*);
-                D3DVP8 old{}, full{ 0, 0, (DWORD)g_W, (DWORD)g_H, 0.0f, 1.0f };
+                // JPOG72: the size comes from back buffer 0 (GetBackBuffer vt[16] -> surface GetDesc vt[8]: Width +24,
+                // Height +28) - outside the park g_W/g_H were never measured (they are set at split start).
+                DWORD bw = (DWORD)g_W, bh = (DWORD)g_H;
+                void* surf = nullptr;
+                using fn_bb = long(__stdcall*)(void*, UINT, DWORD, void**);
+                if (reinterpret_cast<fn_bb>(vt[16])(dev, 0, 0, &surf) >= 0 && surf) {
+                    void** svt = *reinterpret_cast<void***>(surf);
+                    DWORD desc[8]{};
+                    if (reinterpret_cast<long(__stdcall*)(void*, void*)>(svt[8])(surf, desc) >= 0 && desc[6] >= 16 && desc[7] >= 16) { bw = desc[6]; bh = desc[7]; }
+                    reinterpret_cast<unsigned long(__stdcall*)(void*)>(svt[2])(surf);
+                }
+                if (bw < 16 || bh < 16) { bw = 16; bh = 16; }   // never: a back buffer is always bigger
+                D3DVP8 old{}, full{ 0, 0, bw, bh, 0.0f, 1.0f };
                 reinterpret_cast<fn_vp>(vt[41])(dev, &old);                       // GetViewport
                 reinterpret_cast<fn_vp>(vt[40])(dev, &full);                      // SetViewport
                 long hr = reinterpret_cast<fn_clear>(vt[36])(dev, 0, nullptr, 1 /*D3DCLEAR_TARGET*/, 0xFF000000u, 1.0f, 0);
                 reinterpret_cast<fn_vp>(vt[40])(dev, &old);
-                if (g_clearLogs < 2) { ++g_clearLogs; LOG("split: cleared the whole back buffer %.0fx%.0f after split-screen (hr 0x%08lX, viewport was %lu,%lu %lux%lu)", g_W, g_H, (unsigned long)hr, old.X, old.Y, old.Width, old.Height); }
+                if (g_clearLogs < 3) { ++g_clearLogs; LOG("split: cleared the whole back buffer %lux%lu %s (hr 0x%08lX, viewport was %lu,%lu %lux%lu)", bw, bh, frontEnd ? "in the front end (JPOG72 [display] frontend_clear)" : "after split-screen", (unsigned long)hr, old.X, old.Y, old.Width, old.Height); }
             }
         });
-        if (!ok) g_clearFrames = 0;
+        if (!ok) { g_clearFrames = 0; if (frontEnd) { s_feFault = true; LOG("split: front-end clear FAULTED - off until restart"); } }
     }
 
     void Deactivate(const char* why) {
@@ -1448,7 +1656,12 @@ namespace {
     using fn_unloadGame = void(__fastcall*)(void* self, void* edx);
     fn_unloadGame g_origUnloadGame = nullptr;
     void* g_unloadBlockPark = nullptr; bool g_unloadBlock = false;
+    volatile LONG g_unloads = 0;   // JPOG77: p2win checks it around a click (unload during the click = never touch the window again)
     void __fastcall Hook_UnloadGame(void* self, void* edx) {
+        InterlockedIncrement(&g_unloads);
+        // JPOG77: who unloads (owner JPOG76 16:33 = AGameState::OnRemoval 0053AEA1 via a safari window button)
+        LOG("split: ARootTask::UnloadGameController called from %08lX (split %d, game states left %d)",
+            (unsigned long)(uintptr_t)__builtin_return_address(0), (int)g_active, *reinterpret_cast<int*>(game::At(0x0084E760)));
         GUARDED("ridehud unload", { ridehud::OnUnload(); });   // JPOG62
         if (config::Get().unloadSplitOff) {
             void* park = *reinterpret_cast<void**>(game::At(game::addr::AParkManager_m_pParkInfo));
@@ -1509,6 +1722,7 @@ bool Active() { return g_active; }
 int  ActivePlayer() { return g_active ? (int)g_activePlayer : 0; }
 bool MenuLocked() { return g_active && g_menuOpen != 0; }
 bool CanSwitch() { return g_active && g_cam2 != nullptr; }
+LONG UnloadCount() { return g_unloads; }   // JPOG77
 void RequestActive(int p) { if (g_active) InterlockedExchange(&g_requestPlayer, p); }
 void* CameraOfPlayer(int p) { if (!g_active || !g_cam2) return nullptr; return p ? g_cam2 : g_cam1; }
 int   PlayerOfCamera(void* cam) { return (g_active && cam && cam == g_cam2) ? 1 : 0; }
@@ -1548,6 +1762,23 @@ static void TickRtPan(float dt) {
 // JPOG49: GUI units from the HUD player's half to player p's half. The HUD plugin (JPOGMouseFix GetHudMap) draws the
 // GUI (gw x gh) uniformly scaled by s = min(rw/gw, rh/gh) * HUDScaleSplit (clamped 1..2 and so the HUD keeps at least half
 // the GUI width), centred in the HUD player's rectangle - so one GUI unit = s pixels everywhere on screen.
+// JPOG73: player 2's mouse pointer as a GUI point (the same mapping HalfCentreGuiX uses: player p's half position relative
+// to the HUD half, through ConvertRenderScreenToGuiScreen 0x50BDD0). Game thread.
+bool PointerGround(float* o) {
+    if (!g_ptrGroundOk || g_frame - g_ptrGroundFrame > 2 || !kbm::P2WorldPointer()) return false;
+    o[0] = g_ptrGround[0]; o[1] = g_ptrGround[1]; o[2] = g_ptrGround[2];
+    return true;
+}
+bool PointerGui(int p, int& gx, int& gy) {
+    float ux, uy;
+    if (!g_active || !kbm::P2Pointer(ux, uy)) return false;
+    float ox, oy, ow, oh, ax, ay, aw, ah;
+    RectFor(p, ox, oy, ow, oh); RectFor((int)g_activePlayer, ax, ay, aw, ah);
+    float in[2] = { ox + ux * ow - ax, oy + uy * oh - ay }, out[2]{};
+    if (!GUARDED("pointer -> GUI", { reinterpret_cast<void(__stdcall*)(const float*, float*)>(game::At(0x0050BDD0))(in, out); })) return false;
+    gx = (int)lroundf(out[0]); gy = (int)lroundf(out[1]);
+    return true;
+}
 bool GuiOffsetTo(int p, int& dx, int& dy) {
     dx = dy = 0;
     if (!g_active || g_W <= 0) return false;
@@ -1679,6 +1910,7 @@ bool Install() {
         LOG("split: HUD player's pick ray through the middle of their view %s", pr ? "on (JPOG52, [coop] hud_centre_ray)" : "FAILED (call site changed?)");
         bool ug = detour::Install(game::At(0x0047B550), (void*)&Hook_UnloadGame, (void**)&g_origUnloadGame);
         LOG("split: split-screen ends before the park unload %s", ug ? "on (JPOG58, [coop] unload_split_off)" : "FAILED");
+        stateguard::Install();   // JPOG77
         bool mp = detour::Install(game::At(0x005D6180), (void*)&Hook_AddMoneyChange, (void**)&g_origAddMoney);
         LOG("split: money pop-ups off in split-screen %s", mp ? "on (JPOG52, [coop] split_money_popups)" : "FAILED");
         bool a = PatchCall(0x0050C9C3, cam::DeleteCamera, (void*)&Hook_DeleteCamera);
@@ -1699,12 +1931,16 @@ void Tick(void* renderer, float dt) {
     if (!g_iatSlot) return;
     ++g_frame;
     RiderSoundsTick();   // JPOG57
+    partguard::Install();   // JPOG73 rev d: waits until the game filled the particle vtable
     g_renderer = renderer;
     TryInstallWater();   // JPOG40: the terrain shader DLL loads after us
     if (!g_mainScene && *pInterfaceVar)
         g_mainScene = pGetSystemResource(*pInterfaceVar, nullptr, 0x11);   // "MainScene"
 
     if (!g_active && g_clearFrames > 0) { InterlockedDecrement(&g_clearFrames); ClearFullBackBuffer(); }
+    // JPOG72 (owner video: main-menu pointer trails in the black pillarbox): the front end redraws only its 4:3 area,
+    // so the sides keep every pointer drawn there. Outside the park: the whole back buffer black every frame.
+    else if (!g_active && config::Get().frontendClear && !gamectl::InPark()) ClearFullBackBuffer(true);
     const Config& c = config::Get();
     g_pad2.Poll(c.deadzone, c.triggerThreshold);
 
@@ -1727,7 +1963,10 @@ void Tick(void* renderer, float dt) {
         // JPOG35 (owner item 4): also hidden in every menu / screen that is not the park view (Start / pause / ring
         // menus, front end) while a pad is connected - the menus are driven by the pad's highlight there.
         const bool padOn = padslots::SlotOf(0) >= 0 || padslots::SlotOf(1) >= 0;
-        bool hide = c.hideCursor && input_map::ConsoleActive() && !gamectl::CursorFallback() && !minipad::Active() && (g_active || g_pad2.Connected() || (padOn && !gamectl::ParkViewActive()));
+        // JPOG73 rev d (owner 15:12 "mouse still on screen when flying / shooting"): also hidden while a pad drives a vehicle
+        // / mini game ([vehicle] hide_pointer).
+        bool hide = c.hideCursor && input_map::ConsoleActive() && !gamectl::CursorFallback() &&
+                    ((!minipad::Active() && (g_active || g_pad2.Connected() || (padOn && !gamectl::ParkViewActive()))) || (minipad::Active() && c.vehicleHidePointer));
         if (void* sc = GuiScreen()) {
             volatile uint8_t* vis = (uint8_t*)sc + 0x130;
             if (hide) {

@@ -10,6 +10,7 @@ namespace splitscreen {
     bool MenuLocked();            // a full-screen menu is open: no cursor hand-over until it closes
     bool CanSwitch();             // split on and player 2 has a real game camera
     void RequestActive(int p);    // controller thread -> applied on the game thread next frame
+    long UnloadCount();           // JPOG77: ARootTask::UnloadGameController calls so far
     // Cameras per player (rumble uses them): nullptr when that player has no camera of their own.
     void* CameraOfPlayer(int p);
     int   PlayerOfCamera(void* cam);   // 1 for player 2's camera, else 0
@@ -26,4 +27,6 @@ namespace splitscreen {
     void  SetRtPan(bool on, float x, float y);
     // JPOG49: GUI-unit offset from the HUD player's half to player p's half (for player 2's own disc menu).
     bool  GuiOffsetTo(int p, int& dx, int& dy);
+    bool  PointerGui(int p, int& gx, int& gy);
+    bool  PointerGround(float* out3);            // JPOG73: ground point under player 2's pointer (world pointer, this frame)   // JPOG73: player 2's mouse pointer in GUI units (game thread)
 }

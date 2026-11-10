@@ -1,5 +1,6 @@
 #include <windows.h>
 #include "input_map.h"
+#include "kbm.h"
 #include "padcursor.h"
 #include "minipad.h"
 #include "xinput_pad.h"
@@ -269,7 +270,9 @@ void DriveManager(const XPad& pad, int player) {
     }
 
     // Right-stick click: switch console-style <-> PC cursor controls (saved to jpogmod.ini).
-    if (pad.Pressed(PAD_RS)) SetConsoleMode(!ConsoleMode());
+    // JPOG73 rev d (log 15:08:37): R3 in the helicopter switched the whole game to PC style mid-flight (mouse pointer back,
+    // minipad off). No style switch while a vehicle / mini game is driven.
+    if (pad.Pressed(PAD_RS)) { if (minipad::Active()) LOG("controls: R3 ignored while driving / flying (no style switch)"); else SetConsoleMode(!ConsoleMode()); }
 
     if (console) {
         // LB = [ (PrevSelection / rotate footprint), held; RB tap = ] (NextSelection).
@@ -424,7 +427,9 @@ static void IniPathW(wchar_t* p) {
 bool ConsoleActive() {
     static int s_last = -1;
     const bool pad = padslots::SlotOf(0) >= 0 || padslots::SlotOf(1) >= 0;
-    const bool on = ConsoleMode() && (pad || !config::Get().pcWithoutPad);
+    // JPOG70: player 1 switched to keyboard + mouse -> PC style while player 1 has the HUD (vanilla pointer + prompts).
+    const bool p1Kbm = kbm::IsKbm(0) && (!splitscreen::CanSwitch() || splitscreen::ActivePlayer() == 0);
+    const bool on = !p1Kbm && ConsoleMode() && (pad || !config::Get().pcWithoutPad);
     if ((int)on != s_last) {
         if (s_last >= 0 || !on) LOG("controls: %s", on ? "controller connected - console style" : "no controller - PC style (mouse + keyboard)");
         s_last = on;
@@ -445,8 +450,11 @@ bool ConsoleMode() {
             WritePrivateProfileStringW(L"controller", L"scheme_version", L"39", ini);
             LOG("controls: JPOG39 - console style set as the default scheme (ini had console_mode = %d)", was);
         }
-        LOG("controls: %s", g_console ? "CONSOLE style (stick = menus/camera, cursor locked to the middle; R-stick click = PC cursor)"
-                                       : "PC style (stick = cursor; R-stick click = console style)");
+        // JPOG72 (owner test 12:20:51 "controls: CONSOLE style" at split start with no controller): this is only the
+        // CONTROLLER scheme read from the ini; the style in use is ConsoleActive() (its own "controls:" lines).
+        LOG("controls: controller scheme = %s - used only while a controller drives (style in use = the 'controls: no controller / controller connected' lines)",
+            g_console ? "console (stick = menus/camera, cursor locked to the middle; R-stick click = PC cursor)"
+                      : "PC (stick = cursor; R-stick click = console style)");
     }
     return g_console != 0;
 }

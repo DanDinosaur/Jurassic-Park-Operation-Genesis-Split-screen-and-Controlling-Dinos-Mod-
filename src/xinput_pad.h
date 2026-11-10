@@ -36,6 +36,7 @@ namespace padslots {
     void Update();            // scan slots 0-3 (cheap: empty slots re-checked every 500 ms); thread-safe
     int  SlotOf(int player);  // XInput slot for player 0/1, -1 = none
     unsigned Since(int player); // GetTickCount() when that player's pad was (re)assigned, 0 = none
+    int  ConnectedCount();    // JPOG71: controllers connected right now (any slot)
 }
 
 class XPad {
@@ -49,6 +50,11 @@ public:
     bool Down(PadButton b)    const { return m_down[b]; }       // held
     bool Pressed(PadButton b) const { return m_down[b] && !m_prev[b]; } // this-frame edge
     bool Released(PadButton b)const { return !m_down[b] && m_prev[b]; }
+
+    // JPOG70: Back + Start held together (the switch-controls combo): Start is hidden while Back is held, and Back's
+    // tap actions must not fire when it is let go.
+    bool BackCombo() const { return m_backCombo; }
+    bool KbmVirtual() const { return m_kbm; }   // JPOG70: this "pad" is player 2's keyboard + mouse
 
     float LX() const { return m_lx; }  // -1..1 (deadzoned)
     float LY() const { return m_ly; }
@@ -71,5 +77,6 @@ private:
     bool  m_connected = false;
     bool  m_down[PAD_COUNT]{};
     bool  m_prev[PAD_COUNT]{};
+    bool  m_backCombo = false, m_physBackPrev = false, m_startMasked = false, m_kbm = false;
     float m_lx=0,m_ly=0,m_rx=0,m_ry=0,m_lt=0,m_rt=0;
 };

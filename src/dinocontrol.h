@@ -15,6 +15,14 @@
 #pragma once
 #include <cstdint>
 namespace dinocontrol {
+    // JPOG78 (owner 17:12): hints in the words of the player's own input - keyboard + mouse players get PC keys.
+    bool PcPlayer(int player);                     // this player plays with keyboard + mouse
+    const wchar_t* TakeKeyName();
+    const wchar_t* KeyName(int vk, wchar_t* buf, const wchar_t* fallback);   // JPOG80: buf >= 32 wchar_t                  // [keys] ride_toggle as the keyboard shows it (default T)
+    // pad / pc text with %s = take key; player prefix "Player N: " when who >= 0. Returns a per-call buffer.
+    const wchar_t* HintText(int who, const wchar_t* padText, const wchar_t* pcFmt);
+    void NoteWindowUnit(int player, void* unit);   // JPOG76: p2menu's own window of player for unit (game thread)
+    bool HeliPressFromWindow(int player);          // JPOG76: RB + D-pad Up in that window on a helipad / helicopter -> fly (game thread)
     void RequestInfo(int player);      // JPOG55: RB + D-pad Up = the game's info bar for the selected unit
     void RequestControl(int player);   // controller thread: player 0/1 wants the selected dino
     void RequestRelease(int player);   // controller thread
@@ -25,7 +33,8 @@ namespace dinocontrol {
     bool SelectedPos(int player, float* out, unsigned* serial);   // JPOG69 R1: own selection's position + change counter
     // JPOG34: nearest live, uncontrolled dinosaur to pt within radius (game thread). outPos may be null.
     void* NearestDino(const float* pt, float radius, float* outPos);
-    void* NearestUnitOf(const float* pt, float radius, uintptr_t tclassVa);   // JPOG57: any live unit of a class (game thread)
+    void* ZzzDino(int p);   // JPOG73: this player's ridden dino while its sleep icon is on (else null)
+    void* NearestUnitOf(const float* pt, float radius, uintptr_t tclassVa, float* outDist = nullptr);   // JPOG57: any live unit of a class (game thread)
     void  NoteAPress(int player);      // JPOG57: the HUD player pressed A in the park view (controller thread)
     bool  IsZzzUnit(const void* unit); // JPOG57: a player's dino that sleeps now (sleep icon forced visible)
     bool Busy();                       // a dino is controlled (or a request is pending)

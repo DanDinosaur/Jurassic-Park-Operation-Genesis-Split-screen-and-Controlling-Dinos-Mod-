@@ -63,16 +63,44 @@ void Tick(float) {
     const Config& c = config::Get();
     InstallGunSound();
     void* st = nullptr;
+    uintptr_t matchK = 0;   // JPOG76: which kStates class matched (safari jeep = 008B5920 AMiniSafariState, checked by the jeep code at 0x4D8609)
     if (c.vehiclePad && gamectl::InPark() && input_map::ConsoleActive()) {
         GUARDED("minipad state", {
             void* s = gamectl::CurrentState();
-            if (s) for (uintptr_t k : kStates) if (gamectl::IsA(s, k)) { st = s; break; }
+            if (s) for (uintptr_t k : kStates) if (gamectl::IsA(s, k)) { st = s; matchK = k; break; }
         });
+    }
+    // JPOG73 (owner #6): log every game state change while in the park (vtable + whether it is a vehicle state), so the
+    // helicopter's flying state can be added to kStates if it is missing.
+    {
+        static void* s_lastVt = nullptr; static int s_stLogs = 0;
+        void* cur = nullptr; void* vt = nullptr;
+        if (gamectl::InPark()) GUARDED("minipad state log", { cur = gamectl::CurrentState(); vt = cur ? *(void**)cur : nullptr; });
+        if (vt != s_lastVt) {
+            s_lastVt = vt;
+            // JPOG77: name the states met so far that are NOT vehicles (owner JPOG76: 00D21E00 = the bare ARootState left after
+            // the park was unloaded - must never go into kStates; ASafariLayingState 0x8B57E0 = laying a safari track).
+            const char* note = "";
+            if (vt == game::At(0x00D21E00)) note = " = bare ARootState: NO park state (park unloaded)";
+            else if (cur) GUARDED("minipad state name", {
+                if (gamectl::IsA(cur, 0x008B57E0)) note = " = ASafariLayingState (laying a safari track)";
+                else if (gamectl::IsA(cur, 0x008B5920)) note = " = AMiniSafariState (safari ride)"; });
+            if (vt && (s_stLogs < 60 || st || *note)) { ++s_stLogs;   /* JPOG76: vehicle states always logged */ LOG("minipad: game state now vtbl %p (vehicle / mini game state: %d class %08lX, pad console style %d)%s", vt, st != nullptr, (unsigned long)matchK, (int)input_map::ConsoleActive(), note); }
+        }
     }
     const LONG on = st ? 1 : 0;
     if (InterlockedExchange(&g_active, on) != on)
         LOG("minipad: %s", on ? "vehicle / mini game - sticks go to the game's own stick input (console layout), RT fire, LT right button"
                               : "vehicle / mini game ended");
+    // JPOG73 (log 13:32:10 helicopter: 3 faults in ppropertyparser.dll+0x79D0 within 10 ms -> stick off for the WHOLE
+    // session = no flying after that): the fault count now belongs to ONE vehicle / mini game state; a new state (next
+    // flight / drive) tries again. Faulting state: sticks paused for 1.5 s, then retried (3 pauses -> off for that state).
+    static void* s_faultSt = nullptr; static DWORD s_pauseUntil = 0; static int s_pauses = 0;
+    if (st != s_faultSt) { if (g_faults) LOG("minipad: new vehicle / mini game state %p - stick input retried (was off after faults)", st); s_faultSt = st; g_faults = 0; s_pauses = 0; s_pauseUntil = 0; }
+    if (st && g_faults >= 3) {
+        if (s_pauses < 3 && !s_pauseUntil) { s_pauseUntil = GetTickCount() + 1500; ++s_pauses; LOG("minipad: stick paused 1.5 s after faults (pause %d / 3)", s_pauses); }
+        if (s_pauseUntil && (LONG)(GetTickCount() - s_pauseUntil) >= 0) { s_pauseUntil = 0; g_faults = 0; }
+    }
     if (!st || g_faults >= 3) { g_sent[0] = g_sent[1] = false; return; }
     const int pl = splitscreen::CanSwitch() ? splitscreen::ActivePlayer() : 0;
     XPad& pad = pl ? g_pad1 : g_pad0;
@@ -87,8 +115,12 @@ void Tick(float) {
         Ev ev{ i ? 0x1001A : 0x10019, 3, 1, 1, {}, nullptr, v[i][0], v[i][1] };
         bool took = false;
         bool ok = GUARDED("minipad stick", {
-            took = (*reinterpret_cast<bool(__fastcall***)(void*, void*, void*, int)>(st))[0x14 / 4](st, nullptr, &ev, 0); });
-        if (!ok) { if (++g_faults >= 3) LOG("minipad: stick input faulted 3x - off for this session"); continue; }
+            // JPOG73 rev d: the 2nd argument is the game's AInputMap* (ProcessInput(const InputEvent*, AInputMap*), e.g.
+            // AMiniRgrAttackState 0x54E270 -> ARootState::IsInput). We passed 0 -> ppropertyparser.dll+0x79D0 read 0x84 = the
+            // helicopter faults (logs 13:32 / 15:08). Now AInputMap::GetInputMap() 0x468E00 = [0x84D9C0], like the game.
+            void* im = *reinterpret_cast<void**>(game::At(0x0084D9C0));
+            took = (*reinterpret_cast<bool(__fastcall***)(void*, void*, void*, void*)>(st))[0x14 / 4](st, nullptr, &ev, im); });
+        if (!ok) { if (++g_faults >= 3) { LOG("minipad: stick input faulted 3x in state %p (vtbl %p)", st, *(void**)st); break; } continue; }
         if (moved && g_logs < 8) { ++g_logs; LOG("minipad: %s stick %.2f,%.2f -> state %p took=%d", i ? "right" : "left", v[i][0], v[i][1], st, took); }
     }
 }

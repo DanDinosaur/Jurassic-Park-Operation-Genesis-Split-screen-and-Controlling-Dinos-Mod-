@@ -1,4 +1,4 @@
-# install.ps1 - JPOG Co-op v2 installer (called by install.bat). Re-runnable (idempotent).
+# install.ps1 - JPOG Co-op v3 installer (called by install.bat). Re-runnable (idempotent).
 # Copies the mod files and applies the data tweaks as TEXT PATCHES to your own game files
 # (no game files are shipped). Each changed original is backed up once as *.prejpogmod.bak.
 param([string]$Game = "", [switch]$EasyStart, [switch]$NormalStart)
@@ -113,7 +113,7 @@ if (-not $easy) {   # normal game: the mod's always-on unlocks off
     }
     [IO.File]::WriteAllText($p, $s); Write-Host "normal start: unlocks / infinite money off in jpogmod.ini"
 }
-Set-Content $marker "JPOG Co-op v2 installed $(Get-Date -Format s) easy=$([int]$easy)"
+Set-Content $marker "JPOG Co-op v3 installed $(Get-Date -Format s) easy=$([int]$easy)"
 $old = Join-Path $Game "dinput8_real.dll"; if (Test-Path $old) { Remove-Item $old; Write-Host "removed obsolete dinput8_real.dll" }
 
 if ($easy) {

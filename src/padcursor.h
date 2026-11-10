@@ -28,6 +28,7 @@ namespace padcursor {
     void End(Cursor& c);                                  // removes the highlight
     bool Move(Cursor& c, int dx, int dy);                 // dx/dy = -1/0/1 (GUI y grows downwards)
     bool Click(Cursor& c);                                // true = a widget took the press
+    bool HoverAt(Cursor& c, int gx, int gy);              // JPOG73: highlight the widget under GUI point gx,gy (mouse pointer)
     bool Valid(const Cursor& c);                          // root still on the screen
     void Refresh(Cursor& c);                              // re-pick if the highlighted widget vanished / got disabled
 

@@ -50,6 +50,12 @@ namespace {
     using fn_cmd   = bool(__fastcall*)(void* self, void* edx, int cmd, void* widget);
     using fn_upd   = bool(__fastcall*)(void* self, void* edx, float dt);
     using fn_seti  = void(__fastcall*)(void* self, void* edx, int v);
+    // JPOG73: player 2's build tool aims at their mouse pointer (vanilla PC placement) instead of the camera's middle.
+    void TargetOf(void* cam, float* out) {
+        reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kGetTargetPos))(cam, nullptr, out);
+        float g[3];
+        if (cam && cam == splitscreen::CameraOfPlayer(1) && splitscreen::PointerGround(g)) { out[0] = g[0]; out[1] = g[1]; out[2] = g[2]; }
+    }
     struct AimSwap {
         uint8_t* tgt = nullptr; uint8_t saveT[16]{}; uint8_t* pi = nullptr; uint8_t savePI = 0;
         uint8_t* sel = nullptr; int saveSel = 0;
@@ -318,17 +324,17 @@ namespace {
     void Hint(int who, const Slot& s, const wchar_t* extra) {
         wchar_t t[200];
         if (s.fromMenu)   // JPOG49: picked on the player's own disc - short, the same buttons as the HUD player
-            swprintf(t, 200, It(s).kind == 5 ? L"Player %d: %ls%ls   (aim, A = knock down, B back)" :
+            gamectl::WFmt(t, 200, It(s).kind == 5 ? L"Player %d: %ls%ls   (aim, A = knock down, B back)" :
                              It(s).kind == 6 ? L"Player %d: %ls%ls   (A plant, Y remove trees, LB/RB size, B back)" :
                              It(s).kind == 7 ? L"Player %d: %ls%ls   (A shape the land, LB/RB size, B back)" :
                              Drag(It(s).kind) ? L"Player %d: %ls%ls   (A start / A finish, B back)"
                                               : L"Player %d: %ls%ls   (A place, LB/RB rotate, B back)", who + 1,
                      It(s).name, extra ? extra : L"");
         else if (Drag(It(s).kind))
-            swprintf(t, 200, L"Player %d lays: %ls%ls   (A start / A finish, B cancel, D-pad < > change, X close)", who + 1,
+            gamectl::WFmt(t, 200, L"Player %d lays: %ls%ls   (A start / A finish, B cancel, D-pad < > change, X close)", who + 1,
                      It(s).name, extra ? extra : L"");
         else
-        swprintf(t, 200, L"Player %d builds: %ls%ls   (D-pad < > change, LB/RB rotate, A place, B close)", who + 1,
+        gamectl::WFmt(t, 200, L"Player %d builds: %ls%ls   (D-pad < > change, LB/RB rotate, A place, B close)", who + 1,
                  It(s).name, extra ? extra : L"");
         if (gamectl::ShowHintNow(t, 4.0f)) splitscreen::HintToHalf(who, 4.0f);
     }
@@ -357,7 +363,7 @@ bool OpenFor(int who, const char* cmd, int itemType) {
         if (itemType != 3) return false;                  // not a building: Demolish, terrain, trees ... (stage 2c)
         idx = -1;
         strncpy(g_dynUnit[who], cmd, 31); g_dynUnit[who][31] = 0;
-        swprintf(g_dynName[who], 32, L"%hs", cmd);
+        gamectl::WFmt(g_dynName[who], 32, L"%hs", cmd);
     }
     s.item = idx; s.fromMenu = true;
     if (!Create(s, who, true)) { s.fromMenu = false; s.item = 0; LOG("builder2: player %d can't use '%s' from the disc", who + 1, cmd); return false; }
@@ -412,13 +418,13 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
         const bool terra = It(s).kind == 7;
         float a[3]{};
         bool ok = GUARDED("builder2 tool aim", {
-            reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kGetTargetPos))(cam, nullptr, a); });
+            TargetOf(cam, a); });
         s.aimOk = ok && std::isfinite(a[0]) && std::isfinite(a[1]) && std::isfinite(a[2]);
         if (s.aimOk) memcpy(s.aim, a, sizeof a);
         if (terra) {   // player 1 shaping the land at the same time: the ONE terrain selection would be shared
             void* cs = gamectl::CurrentState();
             if (cs && gamectl::IsA(cs, kTerraformClass)) {
-                wchar_t t2[120]; swprintf(t2, 120, L"Player %d is shaping the land - only one player at a time", 2 - who);
+                wchar_t t2[120]; gamectl::WFmt(t2, 120, L"Player %d is shaping the land - only one player at a time", 2 - who);
                 Close(who, "the other player is terraforming"); s.closeReason = 1;
                 if (gamectl::ShowHintNow(t2, 3.0f)) splitscreen::HintToHalf(who, 3.0f);
                 return true;
@@ -461,7 +467,7 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
     }
     if (It(s).kind == 5) {   // JPOG50: demolish (player 1 must not be in demolish mode at the same time)
         if (gamectl::DemolishActive()) {
-            wchar_t t[120]; swprintf(t, 120, L"Player %d is using Demolish - only one player can demolish at a time", 2 - who);
+            wchar_t t[120]; gamectl::WFmt(t, 120, L"Player %d is using Demolish - only one player can demolish at a time", 2 - who);
             Close(who, "the other player started demolishing"); s.closeReason = 1;
             if (gamectl::ShowHintNow(t, 3.0f)) splitscreen::HintToHalf(who, 3.0f);
             return true;
@@ -469,7 +475,7 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
         {   // JPOG52 (owner 10:42: no demolish circle for player 2): this player's aim every frame, for the circle
             float a[3]{};
             const bool okC = GUARDED("builder2 demolish circle aim", {
-                reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kGetTargetPos))(cam, nullptr, a); });
+                TargetOf(cam, a); });
             s.aimOk = okC && std::isfinite(a[0]) && std::isfinite(a[2]);
             if (s.aimOk) memcpy(s.aim, a, sizeof a);
         }
@@ -479,7 +485,7 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
             return true;
         }
         bool okA = GUARDED("builder2 demolish aim", {
-            reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kGetTargetPos))(cam, nullptr, pt); });
+            TargetOf(cam, pt); });
         if (!okA || !std::isfinite(pt[0]) || !std::isfinite(pt[2])) return true;
         const int r = Demolish(s, who, pt);
         LOG("builder2: player %d demolish at (%.1f %.1f) -> %d", who + 1, pt[0], pt[2], r);
@@ -492,7 +498,7 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
     if (Drag(It(s).kind)) {   // JPOG48: path / fence drag tool
         const bool fence = It(s).kind == 4;
         bool ok = GUARDED("builder2 drag aim", {
-            reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kGetTargetPos))(cam, nullptr, pt);
+            TargetOf(cam, pt);
         });
         s.aimOk = ok && std::isfinite(pt[0]) && std::isfinite(pt[1]) && std::isfinite(pt[2]);
         if (s.aimOk) memcpy(s.aim, pt, sizeof pt);
@@ -510,7 +516,7 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
         return true;
     }
     bool ok = GUARDED("builder2 update", {
-        reinterpret_cast<void(__fastcall*)(void*, void*, float*)>(game::At(kGetTargetPos))(cam, nullptr, pt);
+        TargetOf(cam, pt);
         if (pad.Pressed(PAD_RB)) { V<fn_rot>(st, 0x68)(st, nullptr, 1); s.last[0] = 1e9f; }   // fence add-ons flip side
         if (pad.Pressed(PAD_LB)) { V<fn_rot>(st, 0x68)(st, nullptr, -1); s.last[0] = 1e9f; }  // (rotation set by the fence)
         uint8_t* in = Info(st);

@@ -206,6 +206,9 @@ const Config& Load() {
     g_cfg.riderSoundFollow = GetI(ini, "coop", "rider_sound_follow", 1) != 0;
     g_cfg.aTakesControl    = GetI(ini, "dino", "a_takes_control", 0) != 0;
     g_cfg.unloadSplitOff   = GetI(ini, "coop", "unload_split_off", 1) != 0;
+    g_cfg.stateGuard       = GetI(ini, "coop", "state_guard", 1) != 0;            // JPOG77
+    g_cfg.fmodStreamGuard  = GetI(ini, "general", "fmod_stream_guard", 1) != 0;   // JPOG78
+    g_cfg.stateGuardHud    = GetI(ini, "coop", "state_guard_handover", 1) != 0;   // JPOG77
     g_cfg.dinoZzzAlways    = GetI(ini, "dino", "zzz_always", 1) != 0;
     g_cfg.treeKnockOnce    = GetI(ini, "dino", "tree_knock_once", 1) != 0;
     g_cfg.wakeInstant      = GetI(ini, "dino", "wake_instant", 1) != 0;
@@ -234,6 +237,23 @@ const Config& Load() {
     g_cfg.dinoRbTurn       = GetI(ini, "dino", "rb_turn", 1) != 0;
     g_cfg.dinoRbTapTime    = GetF(ini, "dino", "rb_tap_time", 0.25f);
     g_cfg.dinoRbTurnSpeed  = GetF(ini, "dino", "rb_turn_speed", 100.0f);
+    g_cfg.dinoStickCone    = GetF(ini, "dino", "stick_cone", 60.0f);
+    g_cfg.dinoStickLock    = GetI(ini, "dino", "stick_lock", 1) != 0;            // JPOG77
+    g_cfg.dinoStickSide    = GetF(ini, "dino", "stick_side_band", 20.0f);        // JPOG77
+    g_cfg.dinoStickHardTurn= GetF(ini, "dino", "stick_hard_turn", 2.0f);   // JPOG75: > 1 = never (sideways = strafe; turn = LB / RB / right stick)
+    g_cfg.dinoBuildingBites= GetI(ini, "dino", "building_bites", 5);
+    g_cfg.dinoBiteExtra    = GetF(ini, "dino", "bite_extra", 2.0f);
+    g_cfg.p2PointerFovHorizontal = GetI(ini, "pc2ptr", "fov_horizontal", 0) != 0;
+    g_cfg.p2PointerFovScale = GetF(ini, "pc2ptr", "fov_scale", 1.0f);
+    g_cfg.vehicleHidePointer = GetI(ini, "vehicle", "hide_pointer", 1) != 0;
+    g_cfg.p2GameArt        = GetI(ini, "pc2ptr", "game_art", 1) != 0;
+    g_cfg.particleGuard    = GetI(ini, "display", "particle_guard", 1) != 0;
+    g_cfg.p2Repair         = GetI(ini, "coop", "p2_repair", 1) != 0;
+    g_cfg.heliPadFly       = GetI(ini, "vehicle", "heli_pad_fly", 1) != 0;
+    g_cfg.heliPresser      = GetI(ini, "vehicle", "heli_presser", 1) != 0;
+    g_cfg.dinoZzzHint      = GetI(ini, "dino", "zzz_hint_fallback", 1) != 0;
+    g_cfg.dinoEatPeople    = GetI(ini, "dino", "eat_people", 1) != 0;
+    g_cfg.dinoLbTurn       = GetI(ini, "dino", "lb_turn", 1) != 0;
     g_cfg.dinoRbTurnSign   = GetI(ini, "dino", "rb_turn_invert", 0) ? -1.0f : 1.0f;
     g_cfg.dinoStepByFacing = GetI(ini, "dino", "step_by_facing", 1) != 0;
     g_cfg.dinoStepInvX     = GetI(ini, "dino", "step_invert_x", 0) ? -1.0f : 1.0f;
@@ -242,6 +262,9 @@ const Config& Load() {
     { std::string m = GetStr(ini, "dino", "ride_hud_mask", ""); g_cfg.rideHudMask = m.empty() ? 0x1100 : (int)strtol(m.c_str(), nullptr, 0); }
     g_cfg.windowSpinners   = GetI(ini, "controller", "window_spinners", 1) != 0;
     g_cfg.popupCallerLog   = GetI(ini, "coop", "popup_caller_log", 1) != 0;
+    g_cfg.frontendClear    = GetI(ini, "display", "frontend_clear", 1) != 0;
+    g_cfg.p2RepairPopup    = GetI(ini, "coop", "p2_repair_popup", 0) != 0;
+    g_cfg.guiFocusGuard    = GetI(ini, "coop", "gui_focus_guard", 1) != 0;
     g_cfg.iconHudReproj    = GetI(ini, "coop", "icon_hud_reproj", 1) != 0;
     g_cfg.dinoBackAll      = GetI(ini, "dino", "back_all", 1);
     g_cfg.dinoStrafeSpeed  = GetF(ini, "dino", "strafe_speed", 2.0f);

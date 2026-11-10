@@ -2,6 +2,7 @@
 #include <xinput.h>
 #include "xinput_pad.h"
 #include "log.h"
+#include "kbm.h"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -94,25 +95,52 @@ namespace padslots {
         DWORD now = GetTickCount();
         bool scanEmpty = now - g_lastEmptyScan >= 500;
         if (scanEmpty) g_lastEmptyScan = now;
+        WORD btn[4]{};
         for (int i = 0; i < 4; ++i) {
             bool assigned = (g_slot[0] == i || g_slot[1] == i);
             if (!assigned && !scanEmpty && !g_conn[i]) continue;   // XInputGetState on an empty slot is slow
             XINPUT_STATE st{};
             g_conn[i] = XInputGetState(i, &st) == ERROR_SUCCESS;
+            btn[i] = g_conn[i] ? st.Gamepad.wButtons : 0;
         }
         bool changed = false; const char* why = "";
+        // JPOG70: a player who uses keyboard + mouse has no pad (their pad is free for the other player).
+        const bool padMode[2] = { !kbm::IsKbm(0), !kbm::IsKbm(1) };
+        for (int p = 0; p < 2; ++p)
+            if (!padMode[p] && g_slot[p] >= 0) { g_slot[p] = -1; g_since[p] = 0; changed = true; why = p ? "P2 uses keyboard + mouse" : "P1 uses keyboard + mouse"; }
         for (int p = 0; p < 2; ++p)
             if (g_slot[p] >= 0 && !g_conn[g_slot[p]]) { g_slot[p] = -1; g_since[p] = 0; changed = true; why = p ? "P2 pad gone" : "P1 pad gone"; }
         // P1's pad left and P2's pad JUST arrived (< 5 s): that is a pad swap (ROG Ally built-in ->
         // Bluetooth), so the new pad becomes P1. In real co-op (P2 here for longer) P2 keeps their seat
         // and the next pad to connect fills P1 again.
-        if (g_slot[0] < 0 && g_slot[1] >= 0 && now - (DWORD)g_since[1] < 5000) {
+        if (padMode[0] && g_slot[0] < 0 && g_slot[1] >= 0 && now - (DWORD)g_since[1] < 5000) {
             g_slot[0] = g_slot[1]; g_since[0] = now; g_slot[1] = -1; g_since[1] = 0; changed = true; why = "P2 pad promoted to P1";
         }
+        // JPOG70: hold Back + Start 1 s = switch controls. On a player's pad -> that player uses keyboard + mouse;
+        // on a free pad -> the keyboard player (player 1 first) takes this pad.
+        static DWORD s_comboT[4]{}; static bool s_comboFired[4]{};
+        const bool combo = kbm::PadCombo();
+        for (int i = 0; i < 4 && combo; ++i) {
+            const bool both = g_conn[i] && (btn[i] & XINPUT_GAMEPAD_BACK) && (btn[i] & XINPUT_GAMEPAD_START);
+            if (!both) { s_comboT[i] = 0; s_comboFired[i] = false; continue; }
+            if (!s_comboT[i]) { s_comboT[i] = now ? now : 1; continue; }
+            if (s_comboFired[i] || now - s_comboT[i] < 1000) continue;
+            s_comboFired[i] = true;
+            const int owner = g_slot[0] == i ? 0 : g_slot[1] == i ? 1 : -1;
+            if (owner >= 0) { kbm::ToggleFromPad(owner); LOG("pads: slot %d held Back + Start - player %d switches to keyboard + mouse", i, owner + 1); }
+            else {
+                const int p = kbm::IsKbm(0) ? 0 : kbm::IsKbm(1) ? 1 : -1;
+                if (p >= 0) {
+                    kbm::SetKbm(p, false, "free controller: hold Back + Start");
+                    if (g_slot[p] < 0) { g_slot[p] = i; g_since[p] = now ? now : 1; changed = true; why = p ? "P2 took this pad (Back + Start)" : "P1 took this pad (Back + Start)"; }
+                }
+            }
+        }
+        const bool padNow[2] = { !kbm::IsKbm(0), !kbm::IsKbm(1) };
         for (int p = 0; p < 2; ++p) {
-            if (g_slot[p] >= 0) continue;
+            if (g_slot[p] >= 0 || !padNow[p]) continue;
             for (int i = 0; i < 4; ++i)
-                if (g_conn[i] && g_slot[0] != i && g_slot[1] != i) {
+                if (g_conn[i] && g_slot[0] != i && g_slot[1] != i && !s_comboT[i]) {
                     g_slot[p] = i; g_since[p] = now ? now : 1; changed = true; why = p ? "pad joined as P2" : "pad joined as P1"; break;
                 }
         }
@@ -120,6 +148,7 @@ namespace padslots {
         Unlock();
     }
     int SlotOf(int player) { return g_slot[player & 1]; }
+    int ConnectedCount() { int n = 0; for (bool c : g_conn) n += c ? 1 : 0; return n; }
     unsigned Since(int player) { return (unsigned)g_since[player & 1]; }
 }
 
@@ -139,6 +168,23 @@ bool XPad::Poll(float deadzone, float triggerThreshold) {
     }
 
     padslots::Update();
+    // JPOG70: player in keyboard + mouse mode: player 2 = their own keyboard + mouse as a controller, player 1 = no pad
+    // (player 1's keyboard + mouse go to the game itself, as in the vanilla game).
+    if (m_index < 2 && kbm::IsKbm(m_index)) {
+        bool d[PAD_COUNT]{}; float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0;
+        m_kbm = true; m_backCombo = false;
+        if (m_index == 1 && kbm::FillPad2(d, lx, ly, rx, ry, lt, rt)) {
+            m_connected = true;
+            for (int i = 0; i < PAD_COUNT; ++i) m_down[i] = d[i];
+            m_lx = lx; m_ly = ly; m_rx = rx; m_ry = ry; m_lt = lt; m_rt = rt;
+            return true;
+        }
+        m_connected = false;
+        for (int i = 0; i < PAD_COUNT; ++i) m_down[i] = false;
+        m_lx=m_ly=m_rx=m_ry=m_lt=m_rt=0;
+        return false;
+    }
+    m_kbm = false;
     const int slot = padslots::SlotOf(m_index);
     XINPUT_STATE st{};
     if (slot < 0 || XInputGetState(slot, &st) != ERROR_SUCCESS) {
@@ -171,6 +217,16 @@ bool XPad::Poll(float deadzone, float triggerThreshold) {
 
     m_lt = g.bLeftTrigger  / 255.0f;  if (m_lt < triggerThreshold) m_lt = 0;
     m_rt = g.bRightTrigger / 255.0f;  if (m_rt < triggerThreshold) m_rt = 0;
+    // JPOG70: Back + Start = the switch-controls combo -> Start does nothing while Back is held (until Start is let
+    // go), and Back's tap (Research) is skipped for that press.
+    if (kbm::PadCombo()) {
+        const bool back = m_down[PAD_BACK], start = m_down[PAD_START];
+        if (back && !m_physBackPrev) m_backCombo = false;
+        if (back && start) { m_backCombo = true; m_startMasked = true; }
+        if (!start) m_startMasked = false;
+        if (m_startMasked || (back && start)) m_down[PAD_START] = false;
+        m_physBackPrev = back;
+    }
     return true;
 }
 

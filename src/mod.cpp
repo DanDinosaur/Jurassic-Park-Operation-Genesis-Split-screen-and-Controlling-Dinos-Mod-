@@ -12,7 +12,9 @@
 #include "padrumble.h"
 #include "dinocontrol.h"
 #include "cullfix.h"
+#include "partguard.h"
 #include "gamectl.h"
+#include "kbm.h"
 
 // Bootstrap. Runs on its own thread so we never do real work inside the loader
 // lock. The controller runs on this thread too (independent of the game hook), so
@@ -46,6 +48,7 @@ namespace {
         splitscreen::Install();
         dinocontrol::Install();
         cullfix::Install();
+        partguard::Install();   // JPOG73: twister crash
         padrumble::Install();
         if (!hooks::Install())
             LOG("mod: frame hook not installed - controller still active, player-mode features off.");
@@ -67,6 +70,7 @@ namespace {
 
         while (g_run) {
             if (c.virtualPad && ++vpTick >= 3) { vpTick = 0; virtualpad::Refresh(); }
+            GUARDED("pc2 tick", { kbm::Tick(); });   // JPOG70: F8 / Shift+F8, hints for the keyboard + mouse switch
             bool focus = GameHasFocus();
             if (focus != prevFocus) {
                 prevFocus = focus;
@@ -176,7 +180,7 @@ namespace {
                                                           : L"Player 1 is building - hold Back to pass it to Player 2", 4.0f);
                         }
                     }
-                    if (!b && hbPrev && !hbUsed && !hbOther && splitscreen::ActivePlayer() == 0 &&
+                    if (!b && hbPrev && !hbUsed && !hbOther && !pad0.BackCombo() && splitscreen::ActivePlayer() == 0 &&
                         PlayerMode::Current() == Mode::MANAGER && !dinocontrol::Controls(0))
                         input_map::TapKeyName(c.mgr_BACK_TAP);
                     hbPrev = b;
@@ -208,7 +212,7 @@ namespace {
                                                             PAD_DUP, PAD_DDOWN, PAD_DLEFT, PAD_DRIGHT, PAD_LS, PAD_RS };
                         for (PadButton o : others) if (pad1.Pressed(o)) b2Other = true;
                     }
-                    if (!back2 && prevBack2 && !b2Other && !dinocontrol::Controls(1)) input_map::TapKeyName(c.mgr_BACK_TAP);
+                    if (!back2 && prevBack2 && !b2Other && !pad1.BackCombo() && !dinocontrol::Controls(1)) input_map::TapKeyName(c.mgr_BACK_TAP);
                     prevBack2 = back2;
                 } else
                 if (pad0.Connected()) {
@@ -219,7 +223,7 @@ namespace {
                     if (back && !backFired && c.rangerHoldBack && GetTickCount() - backT0 >= 600) {
                         backFired = true; PlayerMode::Toggle();
                     }
-                    if (!back && prevBack && !backFired &&
+                    if (!back && prevBack && !backFired && !pad0.BackCombo() &&
                         PlayerMode::Current() == Mode::MANAGER)
                         input_map::TapKeyName(c.mgr_BACK_TAP);
                     prevBack = back;
