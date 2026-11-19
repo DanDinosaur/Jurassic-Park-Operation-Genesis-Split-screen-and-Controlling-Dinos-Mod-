@@ -9,6 +9,7 @@
 #include "gamectl.h"
 #include "dinocontrol.h"
 #include "splitscreen.h"
+#include "p2menu.h"
 #include <string>
 #include <cwchar>
 #include <unordered_map>
@@ -227,6 +228,16 @@ void DriveManager(const XPad& pad, int player) {
     }
     if (g_dinoMode) { Shutdown(); g_dinoMode = false; }
 
+    // JPOG81 rev f (owner 08:38: "player two can just take control away when they have a menu up - both should only be
+    // able to when the menu is closed"): while the OTHER player's own window is open, the HUD player's buttons that
+    // open windows / discs (A on a unit, Y Manager, X Build, Start) wait - the game's single GUI can hold one window.
+    if (c.hudWindowWait && splitscreen::CanSwitch() && player == splitscreen::ActivePlayer() && p2menu::WindowOpen(1 - player) &&
+        (pad.Pressed(PAD_A) || pad.Pressed(PAD_Y) || pad.Pressed(PAD_X) || pad.Pressed(PAD_START))) {
+        gamectl::RequestHintFor(player, player ? L"Player 1 is using a window - wait until it's closed" : L"Player 2 is using a window - wait until it's closed", 2.5f);
+        LOG("pad: HUD player %d's button waits - player %d has a window open (JPOG81 [coop] hud_window_wait)", player + 1, 2 - player);
+        return;
+    }
+
     // RB is a modifier: RB + D-pad Up = control the selected dino. RB alone (tap, no D-pad used) keeps
     // its normal action, sent on release.
     // Debug ([debug] test_dino): Back + D-pad Right = spawn two test dinos and select one.
@@ -281,7 +292,12 @@ void DriveManager(const XPad& pad, int player) {
         if (rbTap) { KeyDown(VK_OEM_6); Sleep(30); KeyUp(VK_OEM_6); }
         // HUD discs through the game's own toolbar (gamectl), only in the park view.
         const bool pv = gamectl::ParkViewActive();
-        if (pv && pad.Pressed(PAD_A)) dinocontrol::NoteAPress(player);   // JPOG57: A on a dino = take control (HUD player too)
+        // JPOG81 (crash 05:10:20 Ally): A while the info bar cursor is up presses a button of the open window (hatchery) -
+        // it must not also run the "A = select the nearest dino" (that swapped the game selection to a dino under the open
+        // hatchery window -> AUnitHatcheryDialog::UpdateFields got no AHatcheryComponent -> RefreshDinoType(null) crash).
+        // rev g: only while a real window (dialog) is up - the info bar cursor alone stays up whenever a dino is selected,
+        // and blocking A then stopped dinos from being taken (owner 08:45)
+        if (pv && pad.Pressed(PAD_A) && !(infoBar && p2menu::GuiDialogCount() > 0)) dinocontrol::NoteAPress(player);   // JPOG57: A on a dino = take control (HUD player too)
         if (pad.Pressed(PAD_Y) && pv) gamectl::RequestMenu(gamectl::MENU_MANAGER);
         if (pad.Pressed(PAD_START)) {
             if (pv) gamectl::RequestMenu(gamectl::MENU_START);

@@ -1,12 +1,12 @@
-# Jurassic Park: Operation Genesis - Split-screen co-op & dinosaur riding mod (JPOG Co-op v3)
+# Jurassic Park: Operation Genesis - Split-screen co-op & dinosaur riding mod (JPOG Co-op v4)
 
 **2-player split-screen co-op on one PC for Jurassic Park: Operation Genesis (PC, 2003), and take control of any dinosaur to walk, fight, roar, eat and sleep. Play with Xbox controllers, keyboards + mice, or one of each.**
 
-## ⬇️ [Download the latest release](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/releases/latest) → `JPOG_Coop_v3.zip`
+## ⬇️ [Download the latest release](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/releases/latest) → `JPOG_Coop_v4.zip`
 
 ### Quick start
 1. **You need your own copy of Jurassic Park: Operation Genesis for PC.** No game files are included in this mod.
-2. Unzip `JPOG_Coop_v3.zip` anywhere and double-click **`install.bat`**. It finds the game by itself and asks once whether you want the "easy start".
+2. Unzip `JPOG_Coop_v4.zip` anywhere and double-click **`install.bat`**. It finds the game by itself and asks once whether you want the "easy start".
 3. Start the game with **`Launch JPOG.bat`** and load a park.
 4. **Split-screen** - pick how player 2 plays:
    - **Controller:** switch on a second controller. The screen splits after about 2 seconds.
@@ -22,6 +22,16 @@
 - ↩️ To remove the mod, run **`uninstall.bat`**. It restores every game file the installer changed (they are backed up as `*.prejpogmod.bak`).
 - 🐞 Problems? Open an [issue](https://github.com/DanDinosaur/jurassic-park-operation-genesis-split-screen-and-controlling-dinos-mod-/issues) and attach `jpogmod.log` from your game folder.
 
+### New in v4
+- **Knock over and finish:** press **LT + RT together** to knock a smaller dinosaur over, the way the game's big dinosaurs do.
+  When it is down to 5 % health, **LT + RT** again does the finishing move. **LB / RB** now only turn.
+- **Damage messages:** "Hit the Triceratops: -60 (80% health left)", and when your dinosaur gets hurt.
+- **Trees** bend away from dinosaurs and spring back (no more spinning or twisted trees).
+- **One window at a time in split-screen:** while one player has a window open, the other waits (fixes several crashes).
+  A question from a window (vaccinate, sell ...) is answered by the player who asked it.
+- **Fixes:** the dinosaur's body turns with LB / RB (not only the camera); RB + D-pad Up takes the dinosaur you aim at,
+  not one far away; resting dinosaurs lie down to sleep properly; three crashes with windows and the hatchery.
+
 Full controls for controllers and keyboards are below ⬇️
 
 ---
@@ -31,7 +41,7 @@ Full controls for controllers and keyboards are below ⬇️
 - **Full Xbox-style controller play**: no mouse needed (built and tested on a ROG Ally docked to a TV).
 - **Keyboard + mouse for both players**: player 2 can use a second keyboard + mouse with their own pointer and toolbar.
 - **2-player split-screen co-op**: one shared park and budget. Each player has their own camera, their own build / Manager / Dinosaurs / Actions menus and their own windows.
-- **Ride and fight as any dinosaur**: walk, run, strafe, bite, roar, eat, drink, sleep, pounce, finishing moves.
+- **Ride and fight as any dinosaur**: walk, run, strafe, bite, roar, eat, drink, sleep, pounce, knock other dinosaurs over, finishing moves.
 - **Helicopter and building modes for either player**: whoever presses gets the helicopter, safari / balloon track, turret or security camera.
 - **Widescreen** (Hor+) with the HUD pinned to the screen edges, built in.
 - Optional **easy start**: all research and dig sites, every dinosaur species in the hatchery, parks start at 5 stars,
@@ -134,7 +144,10 @@ off while that file is in the game folder. Rename it to `JPOGMouseFix.asi.off` t
   Actions menus and their own windows, in their half. You can both build at the same time.
 - When one player rides a dinosaur, the other player gets the game HUD automatically.
 - Hints and messages appear in the half of the player they are for.
-- If both players want the same one-of-a-kind thing (the same window, or demolish mode), the game says
+- **One window at a time:** while one player has a window open (a building, the hatchery, Finance ...), the other
+  player's window buttons wait and a message says so. Close it and the other player can go. (The game has only one copy
+  of each window, so two at once could crash it.)
+- If both players want the same one-of-a-kind thing (demolish mode, ...), the game says
   "Player N is using X - only one player at a time".
 - (F11 forces split-screen on or off for testing.)
 - Player 2 can also play on their own keyboard + mouse: **Shift+F8** on the second keyboard (see "Controllers, keyboards, or both").
@@ -192,7 +205,7 @@ until you move the stick), then **RB + D-pad Up** takes control. On keyboard + m
 | D-pad Left / Right | - | - | camera up / down |
 | RT | U | left click | bite / attack (a dinosaur in front of the mouth; bite a fence 5 times to break it) |
 | RB (hold) | H (hold) | H (hold) | turn right on the spot |
-| RB (tap) | H (tap) | H (tap) | finishing move (next to another dinosaur) |
+| **LT + RT together** | H (tap) | H (tap) | **knock over** the dinosaur in front (only a bigger dinosaur can knock a smaller one over); at 5 % health or less = **finishing move** |
 | LT | O | middle click | pounce / special move (Raptor leap, rear-up, ...) |
 | Y | Y | Y | roar (hold = second call) |
 | X | N | N | eat (big carnivores next to a goat or cow: grab and swallow) |
@@ -200,6 +213,9 @@ until you move the stick), then **RB + D-pad Up** takes control. On keyboard + m
 | LB (hold) | - | - | turn left on the spot |
 | Right-stick click | Z | Z | lie down and sleep |
 | B | T | T or Esc | let go |
+
+While you fight, messages show the damage you give and take and how much health is left; at 5 % the message tells you
+to press LT + RT for the finishing move.
 
 Riding ends by itself if the dinosaur dies, you leave the park, or split-screen ends. Nobody can take a dinosaur the
 other player is riding. Both players can ride at the same time, and each gets their own chase camera.
@@ -233,11 +249,11 @@ All of the mod's riding keys can be changed in `jpogmod.ini` → `[keys]`; the o
 Every setting is explained by a comment in the file. Useful ones:
 
 - `[controller]`: `console_mode` (1 = controller style, 0 = PC style), `vibration`, `deadzone`, `window_spinners`
-- `[coop]`: `split_orientation`, `auto_split`, `zoom_out_mult`, `p2_repair`, `state_guard` (1 = building buttons can never unload the park - crash fix), `state_guard_handover` (the presser gets the new mode)
-- `[pc2]` / `[pc2ptr]` (new in v3): player 2 keyboard + mouse - `p1_input` / `p2_input`, the join key, the saved `p2_keyboard` / `p2_mouse`, pointer, toolbar
+- `[coop]`: (new in v4) `p2_window_exclusive` / `hud_window_wait` / `p2_popup_keep` (one window at a time), `split_orientation`, `auto_split`, `zoom_out_mult`, `p2_repair`, `state_guard` (1 = building buttons can never unload the park - crash fix), `state_guard_handover` (the presser gets the new mode)
+- `[pc2]` / `[pc2ptr]`: player 2 keyboard + mouse - `p1_input` / `p2_input`, the join key, the saved `p2_keyboard` / `p2_mouse`, pointer, toolbar
   (`hud_buttons`, `hud_scale`), `fov_horizontal` / `fov_scale` if the pointer picks beside the target
 - `[dino]`: `a_takes_control` (1 = A takes control at once instead of RB + D-pad Up), `select_hint`, `attack_range`, `run_mult`,
-  `rb_turn` / `rb_turn_speed`, `lb_turn`, `fence_break` / `fence_bites`, `building_bites`, `eat_people`, camera options,
+  `rb_turn` / `rb_turn_speed`, `lb_turn`, (new in v4) `knock_combo` / `finish_pct` / `damage_hints` / `tree_lean`, `fence_break` / `fence_bites`, `building_bites`, `eat_people`, camera options,
   `stick_lock` (1 = the walk heading is locked when you push forward; only the right stick / LB / RB turn) / `stick_side_band`, `stick_cone` / `stick_hard_turn` (used when stick_lock = 0)
 - `[vehicle]`: `heli_pad_fly` (RB + D-pad Up flies the helicopter), `heli_presser` (the presser gets it), `hide_pointer`
 - `[hud]` / `[display]` / `[mouse]` / `[camera]`: widescreen, HUD size in split-screen, Alt+F4, borderless, mouse speed, camera smoothing
@@ -256,6 +272,8 @@ Every setting is explained by a comment in the file. Useful ones:
 - Some game windows exist only once in the game (for example the Start menu and full-screen reports), so only one player
   can have them open at a time.
 - The safari jeep ride with a controller has not been fully tested yet - reports welcome.
+- v4's new fight moves (knock over, finishing move), the damage messages and the bending trees are new - reports welcome.
+- Dinosaurs ridden right next to buildings can bump into invisible walls (the game never meant dinosaurs to be steered there).
 - Built and tested on one setup (ROG Ally + TV, 1920x1080, Windows 11). Please report problems with your `jpogmod.log`.
 
 ## Building from source

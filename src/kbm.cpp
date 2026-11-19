@@ -18,6 +18,7 @@
 #include "xinput_pad.h"
 #include "detour.h"
 #include "splitscreen.h"
+#include "config.h"
 
 namespace {
     // ------------------------------------------------------------------ settings ([pc2] in jpogmod.ini)
@@ -334,6 +335,12 @@ namespace {
     }
     bool ShiftHeld(int p) { return g_vk[p][VK_LSHIFT] || g_vk[p][VK_RSHIFT]; }
 
+    // JPOG82 (owner list "keyboard + mouse HUD player NOT covered yet"): [coop] hud_window_wait for a keyboard + mouse
+    // HUD player 1 - while player 2's own window is open, player 1's LEFT CLICK and Esc never reach the game (both the
+    // DirectInput mouse / keyboard and the raw input pass-on), so they can't open a second window. Set by Tick().
+    volatile LONG g_hudWait = 0, g_hudWaitHit = 0;
+    bool g_hwMs[8]{}, g_hwKb[256]{};       // a press we swallowed: swallow its release too (no lone "up" for the game)
+    bool g_hwRawL = false;
     // returns true = pass the event on to the game (player 1 / injected)
     bool OnKeyboard(HANDLE h, const RAWKEYBOARD& k) {
         const int vk = FixVk(k);
@@ -370,6 +377,8 @@ namespace {
             }
         }
         if (scan) g_scan[p][scan] = !up;
+        if (p == 0 && vk == VK_ESCAPE && !up && g_hudWait) { g_hwKb[0] = true; InterlockedExchange(&g_hudWaitHit, 1); return false; }   // JPOG82
+        if (p == 0 && vk == VK_ESCAPE && up && g_hwKb[0]) { g_hwKb[0] = false; return false; }
         return pass && p == 0;
     }
 
@@ -384,6 +393,8 @@ namespace {
             return false;
         }
         if (!h || h != g_p2Mouse) {               // player 1's mouse (or injected): the game gets it
+            if ((m.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) && g_hudWait) { g_hwRawL = true; InterlockedExchange(&g_hudWaitHit, 1); return false; }   // JPOG82
+            if ((m.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) && g_hwRawL) { g_hwRawL = false; return false; }
             static const USHORT d1[5] = { RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN };
             static const USHORT u1[5] = { RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_UP };
             for (int i = 0; i < 5; ++i) { if (m.usButtonFlags & d1[i]) g_p1mb[i] = true; if (m.usButtonFlags & u1[i]) { g_p1mb[i] = false; g_p1mbUpT[i] = now; } }
@@ -608,10 +619,16 @@ namespace {
         if (self == g_kbDev) {
             BYTE* b = (BYTE*)data;
             for (DWORD i = 0; i < cb && i < 256; ++i) g_diKey[i] = (b[i] & 0x80) != 0;
+            if (g_hudWait && cb > 1 && (b[1] & 0x80)) { b[1] = 0; InterlockedExchange(&g_hudWaitHit, 1); }   // JPOG82: Esc (DIK 0x01)
             if (g_capturing && g_p2Kb && S.kbMask)
                 for (DWORD i = 0; i < cb && i < 256; ++i) if ((b[i] & 0x80) && P2Only((int)i)) {
                     b[i] = 0; if (InterlockedIncrement(&g_masked) <= 3) LOG("pc2: player 2's key 0x%02lX kept away from the game (DirectInput state)", i); }
-        } else if (self == g_msDev && cb >= 16 && MouseMaskOn()) {
+        }
+        if (self == g_msDev && cb >= 16 && g_hudWait) {   // JPOG82: left button (state mode)
+            BYTE* bt = (BYTE*)data + 12;
+            if (bt[0] & 0x80) { bt[0] = 0; InterlockedExchange(&g_hudWaitHit, 1); }
+        }
+        if (self == g_msDev && cb >= 16 && MouseMaskOn()) {
             LONG* ax = (LONG*)data; BYTE* bt = (BYTE*)data + 12; const DWORD nb = cb >= 20 ? 8 : 4;
             const DWORD now = GetTickCount();
             Lock l;
@@ -630,6 +647,26 @@ namespace {
         HRESULT hr = vh->dd(self, cbObj, rg, inout, flags);
         if (FAILED(hr) || !rg || !inout || !*inout || cbObj < 8) return hr;
         BYTE* p = (BYTE*)rg;
+        // JPOG82: hud_window_wait for a keyboard + mouse HUD player 1 - drop Esc / left-button presses (and their releases)
+        if (!(flags & 1) && (self == g_kbDev || self == g_msDev)) {
+            DWORD out = 0;
+            for (DWORD i = 0; i < *inout; ++i) {
+                BYTE* e = p + i * cbObj;
+                const DWORD ofs = *(DWORD*)e; const bool press = (*(DWORD*)(e + 4) & 0x80) != 0;
+                bool* seen = self == g_kbDev ? ((ofs & 0xFF) == 0x01 ? &g_hwKb[1] : nullptr) : (ofs == 12 ? &g_hwMs[0] : nullptr);
+                bool keep = true;
+                if (seen) {
+                    if (press && g_hudWait) { *seen = true; keep = false; InterlockedExchange(&g_hudWaitHit, 1);
+                                              if (self == g_kbDev) g_diKey[1] = false; }
+                    else if (!press && *seen) { *seen = false; keep = false; }
+                }
+                if (!keep) continue;
+                if (out != i) memmove(p + out * cbObj, e, cbObj);
+                ++out;
+            }
+            *inout = out;
+            if (!out) return hr;
+        }
         if (self == g_kbDev) {
             if (!(flags & 1)) for (DWORD i = 0; i < *inout; ++i) { BYTE* e = p + i * cbObj; g_diKey[*(DWORD*)e & 0xFF] = (*(DWORD*)(e + 4) & 0x80) != 0; }
             if ((flags & 1 /*PEEK*/) || !g_capturing || !g_p2Kb || !S.kbMask) return hr;
@@ -1008,6 +1045,19 @@ bool KeyDown(int p, int vk) {
 void Tick() {
     Load();
     if (!S.enabled) return;
+    {   // JPOG82: [coop] hud_window_wait for a keyboard + mouse HUD player 1 (pad players: input_map)
+        bool w = false;
+        GUARDED("pc2 hud wait", { w = config::Get().hudWindowWait && splitscreen::CanSwitch() && splitscreen::ActivePlayer() == 0 &&
+                                      IsKbm(0) && p2menu::WindowOpen(1); });
+        if (InterlockedExchange(&g_hudWait, w ? 1 : 0) != (w ? 1 : 0))
+            LOG("pc2: keyboard + mouse player 1 %s (JPOG82 [coop] hud_window_wait)", w ? "WAITS - player 2's window is open: left click + Esc held back" : "free again");
+        static DWORD s_hintT = 0;
+        if (InterlockedExchange(&g_hudWaitHit, 0) && GetTickCount() - s_hintT > 2500) {
+            s_hintT = GetTickCount();
+            gamectl::RequestHintFor(0, L"Player 2 is using a window - wait until it's closed", 2.5f);
+            LOG("pc2: keyboard + mouse player 1's click / Esc waited - player 2 has a window open");
+        }
+    }
     // before the split runs: F8 (player 1) / Shift+F8 (player 2 joins) through the normal keyboard state
     static bool s_prevF8 = false;
     // JPOG71: also the game's own DirectInput keyboard state (rev b: Shift+F8 did nothing, no log line - an exclusive

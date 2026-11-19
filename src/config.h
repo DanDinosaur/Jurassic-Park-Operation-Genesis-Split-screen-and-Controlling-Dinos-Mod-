@@ -122,6 +122,26 @@ struct Config {
     bool  stateGuardHud     = true;    // [coop] state_guard_handover (JPOG77): after such a kept click by the player without the HUD, the HUD goes to that player
     bool  unloadSplitOff    = true;    // [coop] unload_split_off (JPOG58): end split-screen inside ARootTask::UnloadGameController, before the park is torn down
     bool  dinoZzzAlways     = true;    // [dino] zzz_always (JPOG57): the sleep icon over a controlled sleeping dino without holding the info key
+    // JPOG81 (owner 2026-11-14 07:45-07:50): trees lean + spring back (no spin), LT + RT = knock down / finisher at <= finish_pct,
+    // damage hints, no cross-pair finishers, RB / LB taps do nothing, RT bites no longer finish
+    bool  treeLean          = true;    // [dino] tree_lean: a player's dino bends trees itself (lean away, back up, exact restore)
+    float treeLeanDeg       = 35.0f;   // [dino] tree_lean_deg: how far a tree leans (degrees)
+    bool  treeLeanSound     = true;
+    bool  treeLeanAll       = true;    // [dino] tree_lean_all (JPOG81 rev f): AI dinos' tree knocks bend the same way (vanilla knock spins at high fps)    // [dino] tree_lean_sound: the vanilla knock sound when a tree starts to lean
+    bool  dinoKnockCombo    = true;    // [dino] knock_combo: LT + RT together = knock the dino in front over (vanilla KnockOvr.fsm)
+    float dinoComboWindow   = 0.12f;   // [dino] combo_window: seconds to press the 2nd trigger
+    float dinoFinishPct     = 5.0f;    // [dino] finish_pct: LT + RT on a dino at or below this % health = its finishing move
+    float dinoKnockSize     = 3.0f;    // [dino] knock_size: vanilla CanKnockTarget(size) (Ram.fsm uses 3.0)
+    bool  dinoKnockBigger   = true;    // [dino] knock_bigger_only: only a bigger dino (collision radius) knocks another over
+    bool  dinoFinisherCross = false;   // [dino] finisher_cross: 1 = old cross-pair kills (Spino 'Tx' anim on a Triceratops: 14 m apart)
+    bool  dinoRbTapFinisher = false;   // [dino] rb_tap_finisher: 1 = old RB tap finisher
+    bool  dinoBiteFinisher  = false;   // [dino] bite_finisher: 1 = old RT bite finisher below finish_health_low
+    bool  dinoDamageHints   = true;
+    bool  dinoTakeNearAim   = true;
+    bool  dinoTurnFaceCmd   = true;    // [dino] turn_face_cmd (JPOG81 rev g): LB / RB also send the game's face-direction command    // [dino] take_near_aim (JPOG81 rev g): RB + Up takes only a selected dino within 60 m of the player's aim
+    bool  p2WindowExclusive = true;
+    bool  p2PopupKeep       = true;    // [coop] p2_popup_keep (JPOG82): a question popup raised by the no-HUD player's window keeps that window open under it; that player answers it (D-pad + A / pointer + click)
+    bool  hudWindowWait     = true;    // [coop] hud_window_wait (JPOG81 rev f): the HUD player can't open a window / disc while the other player's window is open    // [coop] p2_window_exclusive (JPOG81): the no-HUD player's window only while the HUD player is in the plain park view    // [dino] damage_hints: hints for damage given / taken (rider's half)
     bool  treeKnockOnce     = true;    // [dino] tree_knock_once (JPOG57): a player's dino knocks each tree cell once per 3 s
     bool  wakeInstant       = true;    // [dino] wake_instant (JPOG57): a taken sleeping dino stands up at once (no slide)
     bool  p2Commands        = true;    // [coop] p2_commands (JPOG55): player 2's Actions disc commands (park entrance, emergency, build entrance)

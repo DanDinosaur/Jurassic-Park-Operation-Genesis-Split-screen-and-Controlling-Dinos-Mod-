@@ -24,7 +24,8 @@ namespace p2menu {
     bool Update(int who, XPad& pad, void* cam, float dt);
     bool IsOpen(int who);
     bool InOwnWindowCall();   // JPOG60 (fix C): true while p2menu activates / deactivates player 2's own window
-    bool WindowOpen(int who);   // JPOG59: player who has their own window open (the pad drives its highlight)
+    bool WindowOpen(int who);
+    int  GuiDialogCount();      // JPOG81 rev g: the game's active dialog list count (a real window is up when > 0)   // JPOG59: player who has their own window open (the pad drives its highlight)
     void Close(int who, const char* why);
     void CloseAll(const char* why);
     int  OpenUnitWindow(int who, void* unit);   // JPOG57: the unit's own info window in player who's half (game thread)

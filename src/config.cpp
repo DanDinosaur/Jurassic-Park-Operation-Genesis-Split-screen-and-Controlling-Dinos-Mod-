@@ -211,6 +211,24 @@ const Config& Load() {
     g_cfg.stateGuardHud    = GetI(ini, "coop", "state_guard_handover", 1) != 0;   // JPOG77
     g_cfg.dinoZzzAlways    = GetI(ini, "dino", "zzz_always", 1) != 0;
     g_cfg.treeKnockOnce    = GetI(ini, "dino", "tree_knock_once", 1) != 0;
+    g_cfg.treeLean          = GetI(ini, "dino", "tree_lean", 1) != 0;
+    g_cfg.treeLeanDeg       = GetF(ini, "dino", "tree_lean_deg", 35.0f);
+    g_cfg.treeLeanSound     = GetI(ini, "dino", "tree_lean_sound", 1) != 0;
+    g_cfg.treeLeanAll       = GetI(ini, "dino", "tree_lean_all", 1) != 0;
+    g_cfg.dinoKnockCombo    = GetI(ini, "dino", "knock_combo", 1) != 0;
+    g_cfg.dinoComboWindow   = GetF(ini, "dino", "combo_window", 0.12f);
+    g_cfg.dinoFinishPct     = GetF(ini, "dino", "finish_pct", 5.0f);
+    g_cfg.dinoKnockSize     = GetF(ini, "dino", "knock_size", 3.0f);
+    g_cfg.dinoKnockBigger   = GetI(ini, "dino", "knock_bigger_only", 1) != 0;
+    g_cfg.dinoFinisherCross = GetI(ini, "dino", "finisher_cross", 0) != 0;
+    g_cfg.dinoRbTapFinisher = GetI(ini, "dino", "rb_tap_finisher", 0) != 0;
+    g_cfg.dinoBiteFinisher  = GetI(ini, "dino", "bite_finisher", 0) != 0;
+    g_cfg.dinoDamageHints   = GetI(ini, "dino", "damage_hints", 1) != 0;
+    g_cfg.dinoTakeNearAim   = GetI(ini, "dino", "take_near_aim", 1) != 0;
+    g_cfg.dinoTurnFaceCmd   = GetI(ini, "dino", "turn_face_cmd", 1) != 0;
+    g_cfg.p2WindowExclusive = GetI(ini, "coop", "p2_window_exclusive", 1) != 0;
+    g_cfg.hudWindowWait     = GetI(ini, "coop", "hud_window_wait", 1) != 0;
+    g_cfg.p2PopupKeep       = GetI(ini, "coop", "p2_popup_keep", 1) != 0;
     g_cfg.wakeInstant      = GetI(ini, "dino", "wake_instant", 1) != 0;
     g_cfg.splitCullBoth    = GetI(ini, "coop", "split_cull_both", 1) != 0;
     g_cfg.perfLog          = GetI(ini, "debug", "perf_log", 1) != 0;

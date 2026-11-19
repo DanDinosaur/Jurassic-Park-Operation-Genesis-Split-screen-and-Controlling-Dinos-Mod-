@@ -249,6 +249,7 @@ namespace {
 
     int DlgOpen(int who, const char* cls);   // JPOG53, below: 0 = no, 1 = open, 2 = player 1 has it (message shown)
     int DlgShow(int who, void* d, const char* cls);
+    void ClearBadDlg(void* d);   // JPOG81
 
     // JPOG55 (3b): player 2's Actions-disc commands, without the game's own states/popups on player 1's chain.
     //   GotoParkEntrance: AUnitManager::GetUnitType 0x46C080 ("welccntr") + FindClosestUnitOfType 0x4A0D10 -> model centre
@@ -391,6 +392,19 @@ namespace {
     fn_cwf g_origCwf = nullptr;
     int g_cwfLogs = 0;
     void __fastcall Hook_ChangeWidgetFocus(void* scr, void* edx, void* w, int b) {
+        // JPOG81 (crash 2026-11-14 05:03:27 Ally, tguiinterface+0x13AC8): the vaccination "AMessagePopup" opened from the
+        // no-HUD player's own window; closing it (AMessagePopupState::OnSelection -> RemoveSelf -> AModalDialogState::
+        // OnActivate) refocuses that window's widget - once with screen NULL (skipped above since JPOG72), then on the real
+        // screen with the widget detached (widget +0x44 = NULL, read as [ecx] at 0x13AC8). Skip that one too.
+        if (scr && w && w != scr && config::Get().guiFocusGuard) {
+            void* owner = reinterpret_cast<void*>(1);
+            GUARDED("focus guard widget owner", { owner = *reinterpret_cast<void**>((uint8_t*)w + 0x44); });
+            if (!owner) {
+                static int s_logs = 0;
+                if (s_logs++ < 20) LOG("guard: focus change to DETACHED widget %p (no +0x44 owner) on screen %p skipped (would crash tguiinterface+0x13AC8, JPOG81)", w, scr);
+                return;
+            }
+        }
         if (scr || !config::Get().guiFocusGuard) { g_origCwf(scr, edx, w, b); return; }
         if (g_cwfLogs < 20) {
             ++g_cwfLogs;
@@ -440,6 +454,14 @@ namespace {
     void* GuiSystem() { return reinterpret_cast<void*(__stdcall*)()>(game::At(kGetGUISystem))(); }
     template <class T> T VFn(void* o, int off) { return reinterpret_cast<T>((*reinterpret_cast<void***>(o))[off / 4]); }
 
+    // JPOG82 (root cause of the JPOG81 rev b crash tguiinterface+0x13AC8): a button in the no-HUD player's window that asks
+    // a question (vaccinate, sell, ... = AMessagePopupState 0x8B4820 pushed on the HUD player's state chain) changed the
+    // game state, so the JPOG77 state check closed that window AT ONCE, under its own popup; answering the popup then
+    // refocused the closed window's (detached) widget. Now [coop] p2_popup_keep: the window stays open while its popup is
+    // up, the no-HUD player answers it (their own highlight on the popup), "one window at a time" ignores it.
+    constexpr uintptr_t kMsgPopupStateCls = 0x008B4820;   // AMessagePopupState::m_sClass (GetClass 0x58D580)
+    void* g_p2Pop = nullptr;          // the popup state raised by the no-HUD player's window
+    padcursor::Cursor g_popCur;
     void DlgClose(const char* why, bool hint = false) {
         if (!g_dlg) return;
         void* d = g_dlg; void* w = F(d, 0x2C);
@@ -484,6 +506,8 @@ namespace {
 
     bool __fastcall Hook_ActivateDialog(void* sys, void* edx, void* dlg, int loc) {
         if (dlg && dlg == g_dlg) DlgClose("player 1 opened the same window", true);   // the real conflict: player 1 wins
+        else if (dlg && g_dlg && !g_p2Call && config::Get().p2WindowExclusive) DlgClose("the HUD player opened another window", false);   // JPOG81: one at a time
+        if (dlg && !g_p2Call) ClearBadDlg(dlg);   // JPOG81: the game sets this dialog up fully itself -> usable again
         LogActivateCaller(dlg, loc);
         return g_origActivate(sys, edx, dlg, loc);
     }
@@ -535,9 +559,53 @@ namespace {
     }
 
     // JPOG57: show an already-found AGameDialog in player who's half (shared by DlgOpen and OpenUnitWindow).
+    void* g_badDlgs[8] = {}; void* g_badDlgUnit[8] = {}; unsigned g_badDlgNext = 0;   // JPOG81: dialogs whose set-up faulted
+    // (and the unit it faulted on) - not used for the no-HUD player until the GAME itself opens that dialog again (owner
+    // 08:28: "can the other player open it once the other player is done?" - yes: the game's own full set-up repairs it)
+    // JPOG81 (owner 08:03 + crash 05:22:53 pguirenderer+0x7B85, GetTexture on a garbage factory): player 2's own window
+    // was open while player 1 used the info-bar window / its popup and then the Build disc - the game keeps ONE cached
+    // dialog per class and one GUI system, both players' windows at once corrupted it. Owner rule (2026-11-09): what
+    // can't safely run twice is one player at a time. [coop] p2_window_exclusive: the no-HUD player's window only while
+    // the HUD player is in the plain park view; player 1 opening any menu / window closes it.
+    void ClearBadDlg(void* d) {
+        for (int i = 0; i < 8; ++i) if (g_badDlgs[i] == d) {
+            void* u = g_badDlgUnit[i];
+            g_badDlgs[i] = nullptr; g_badDlgUnit[i] = nullptr;
+            if (u) for (int j = 0; j < 8; ++j) if (g_badUnits[j] == u) g_badUnits[j] = nullptr;
+            LOG("p2win: dialog %p (faulted before, unit %p) opened by the game itself - usable for the no-HUD player again (JPOG81)", d, u);
+        }
+    }
+    bool HudBusy() {
+        if (!config::Get().p2WindowExclusive) return false;
+        void* st = gamectl::CurrentState();
+        if (!st || gamectl::IsDefaultState(st)) return false;
+        if (g_p2Pop && st == g_p2Pop) return false;   // JPOG82: the no-HUD player's own popup
+        // rev f (owner 08:38 "player 2 shut the menu and it didn't let me for a bit"): the info-bar state (vtbl 0xD1C260)
+        // stays while a unit is merely SELECTED - only busy when a dialog of the HUD player's is really up
+        if (*reinterpret_cast<uintptr_t*>(st) == (uintptr_t)game::At(0x00D1C260)) {
+            int n = 1;
+            void* sys = GuiSystem();
+            if (sys) GUARDED("hud dialog count", { n = F<int>(sys, 0xE8); });
+            return n > 0;
+        }
+        return true;
+    }
     int DlgShow(int who, void* d, const char* cls) {
         void* sys = GuiSystem();
         if (!sys || !d) return 0;
+        for (int i = 0; i < 8; ++i) if (g_badDlgs[i] == d) {
+            LOG("p2win: player %d wants %s - its dialog %p faulted before, not used again (JPOG81)", who + 1, cls, d);
+            HintFor(who, L"That window can't be opened right now", 2.5f);
+            return 0;
+        }
+        if (HudBusy()) {
+            const int hud = splitscreen::ActivePlayer();
+            HintFor(who, hud == 1 ? L"Only one player can use a window at a time - Player 2 is using one" :
+                                    L"Only one player can use a window at a time - Player 1 is using one", 3.0f);
+            LOG("p2win: player %d wants %s - the HUD player is in a menu / window (state vtbl %p), one at a time (JPOG81)", who + 1, cls,
+                gamectl::CurrentState() ? *(void**)gamectl::CurrentState() : nullptr);
+            return 2;
+        }
         void* w = F(d, 0x2C);
         if (!w) { LOG("p2win: window %s has no widget", cls); return 0; }
         if (F(d, 0x04) || F(w, 0x44)) {                                         // already on the screen = player 1's
@@ -655,6 +723,18 @@ namespace {
             return;
         }
         void* st1 = gamectl::CurrentState();
+        bool isPop = false;
+        if (st1 && st1 != st0 && !kept && config::Get().p2PopupKeep) GUARDED("p2win popup class", { isPop = gamectl::IsA(st1, kMsgPopupStateCls); });
+        if (isPop) {   // JPOG82: the window's own question - keep the window, the player answers it
+            void* pd = nullptr; void* pw = nullptr;
+            GUARDED("p2win popup widget", { pd = F(st1, 0x48); pw = pd ? F(pd, 0x2C) : nullptr; });
+            g_p2Pop = st1; g_popCur = padcursor::Cursor{};
+            if (pw) GUARDED("p2win popup cursor", { padcursor::Begin(g_popCur, pw, "player 2's popup"); });
+            LOG("p2win: player %d's click on window %s raised a question popup (state %p, dialog %p, widget %p, highlight %p) - window kept, the player answers it (JPOG82 [coop] p2_popup_keep)",
+                who + 1, g_dlgName, st1, pd, pw, g_popCur.cur);
+            HintFor(who, L"Answer the question: D-pad + A", 3.0f);
+            return;
+        }
         if (st1 != st0 || kept) {
             LOG("p2win: player %d's click on window %s changed the game state (vtbl %p -> %p, park state kept %d) - window closed, no more clicks on it (JPOG77)",
                 who + 1, g_dlgName, st0 ? *(void**)st0 : nullptr, st1 ? *(void**)st1 : nullptr, kept);
@@ -685,6 +765,12 @@ bool g_winFromUnit = false;   // JPOG68: the open window came from A / RB + Up o
 bool IsOpen(int who) { return g_open && g_who == who; }
 bool InOwnWindowCall() { return g_p2Call > 0; }   // JPOG60 (fix C)
 bool WindowOpen(int who) { return g_dlg && g_dlgWho == who; }   // JPOG59
+int GuiDialogCount() {   // JPOG81 rev g: dialogs on the game's own active list (the HUD player's windows)
+    int n = 0;
+    void* sys = GuiSystem();
+    if (sys) GUARDED("gui dialog count", { n = F<int>(sys, 0xE8); });
+    return n;
+}
 
 // JPOG57 (owner 12:05: "RB + D-pad Up = the vanilla menu options for BOTH players"; 6c first step): the unit's own
 // window (AUnit vfn +0x18 GetDialog: dinosaur -> AUnitDinosaurDialog, building -> its unit dialog / "GUIDialog"
@@ -705,6 +791,44 @@ int OpenUnitWindow(int who, void* unit) {
     }
     void* d = nullptr; void* px = *reinterpret_cast<void**>((uint8_t*)unit + 0x24);
     bool attached = false;
+    // JPOG81 (owner 08:38, log 05:35:40-05:36:47: EVERY hatchery faulted for the no-HUD player - RefreshDinoType(null),
+    // AUnitHatcheryDialog::UpdateFields 0x10018EC0 finds no AHatcheryComponent on the attached unit). Check BEFORE
+    // attaching: a hatchery window needs a unit with the hatchery component - else its linked building (the hatchery
+    // power box / the hatchery itself, AUnitBuilding::GetLinkedBuilding 0x4C5700); none -> no window, NO fault (a fault
+    // used to block that dialog for every other building too).
+    {
+        static const void* s_hDlg = nullptr; static const void* s_pBox = nullptr; static bool s_init = false;
+        if (!s_init) {
+            s_init = true;
+            if (HMODULE um = GetModuleHandleA("Units.dll")) {
+                s_hDlg = (const void*)GetProcAddress(um, "?m_sClass@AUnitHatcheryDialog@@2VTClass@Toshi@@A");
+                s_pBox = (const void*)GetProcAddress(um, "?m_sClass@AUnitHatcheryPowerBox@@2VTClass@Toshi@@A");
+            }
+            LOG("p2win: hatchery classes dialog %p, power box %p (JPOG81)", s_hDlg, s_pBox);
+        }
+        using fn_isA2 = bool(__fastcall*)(void*, void*, const void*);
+        auto isA = [&](void* o, const void* cls) { return o && cls && (*reinterpret_cast<fn_isA2*>(game::At(0x00739E20)))(o, nullptr, cls); };
+        auto hatchComp = [&](void* u) -> void* {
+            void* c = nullptr;
+            if (u) GUARDED("p2win hatchery component", { c = reinterpret_cast<void*(__fastcall*)(void*, void*, const void*)>(game::At(0x0046B4F0))(u, nullptr, game::At(0x008B6B60)); });
+            return c;
+        };
+        void* d0 = nullptr;
+        GUARDED("p2win unit dialog (look)", { d0 = VFn<void*(__fastcall*)(void*, void*)>(unit, 0x18)(unit, nullptr); });
+        if (d0 && isA(d0, s_hDlg) && !hatchComp(unit)) {
+            void* lb = nullptr;
+            GUARDED("p2win linked building", { lb = reinterpret_cast<void*(__fastcall*)(void*, void*)>(game::At(0x004C5700))(unit, nullptr); });
+            const bool box = isA(unit, s_pBox);
+            if (lb && hatchComp(lb)) {
+                LOG("p2win: player %d - unit %p (power box %d) has no hatchery component - its linked building %p has: using that (JPOG81)", who + 1, unit, box, lb);
+                unit = lb; px = *reinterpret_cast<void**>((uint8_t*)unit + 0x24);
+            } else {
+                LOG("p2win: player %d - hatchery window for unit %p (power box %d, linked %p) - no hatchery component anywhere, not opened (JPOG81)", who + 1, unit, box, lb);
+                HintFor(who, L"No info for that one", 2.0f);
+                return 0;
+            }
+        }
+    }
     bool ok = GUARDED("p2win unit dialog", {
         d = VFn<void*(__fastcall*)(void*, void*)>(unit, 0x18)(unit, nullptr);
         if (d && px) {
@@ -718,6 +842,7 @@ int OpenUnitWindow(int who, void* unit) {
     });
     auto markBad = [&](const char* why) {
         g_badUnits[g_badNext++ & 7] = unit;
+        if (d) { g_badDlgUnit[g_badDlgNext & 7] = unit; g_badDlgs[g_badDlgNext++ & 7] = d; }   // JPOG81: the dialog too (05:21:18 hatchery fault, reused 05:22:50)
         if (d) GUARDED("p2win detach", { reinterpret_cast<fn_v>(game::At(kDetachUnit))(d, nullptr); });
         LOG("p2win: player %d - unit %p window %s: dialog %p detached, unit marked unusable", who + 1, unit, why, d);
         HintFor(who, L"No info for that one", 2.0f);
@@ -749,6 +874,49 @@ bool Update(int who, XPad& pad, void* cam, float dt) {
     if (g_dlg && g_dlgWho != who) DlgClose("the other player has no HUD now");
     if (g_dlgHintWho == who) { g_dlgHintWho = -1; HintFor(who, L"Player 1 opened the same window - it moved to player 1's screen", 3.0f); }
     if (builder2::Open(who)) return false;                           // the build tool drives the pad
+    if (g_p2Pop) {                                                   // JPOG82: the no-HUD player's question popup
+        if (gamectl::CurrentState() != g_p2Pop) {
+            LOG("p2win: player %d's question popup %p answered / gone (JPOG82)", who + 1, g_p2Pop);
+            g_p2Pop = nullptr; GUARDED("p2win popup end", { padcursor::End(g_popCur); }); g_popCur = padcursor::Cursor{};
+            if (g_dlg) {
+                void* w = F(g_dlg, 0x2C);
+                if (!w || !F(w, 0x44) || !(F<uint32_t>(w, 0x88) & 4)) {
+                    LOG("p2win: player %d's window %s closed by its popup", g_dlgWho + 1, g_dlgName);
+                    padcursor::End(g_dlgCur); g_dlg = nullptr; g_dlgCur = padcursor::Cursor{};
+                } else GUARDED("p2win popup refresh", { padcursor::Refresh(g_dlgCur); });
+            }
+            return true;
+        }
+        if (g_dlgWho == who) {
+            float x = pad.LX(), y = -pad.LY();
+            if (pad.Down(PAD_DLEFT)) x = -1; if (pad.Down(PAD_DRIGHT)) x = 1;
+            if (pad.Down(PAD_DUP)) y = -1;   if (pad.Down(PAD_DDOWN)) y = 1;
+            static bool s_held = false;
+            const bool held = fabsf(x) > 0.5f || fabsf(y) > 0.5f;
+            if (held && !s_held) {
+                const int dx = fabsf(x) >= fabsf(y) ? (x > 0 ? 1 : -1) : 0, dy = dx ? 0 : (y > 0 ? 1 : -1);
+                GUARDED("p2win popup move", { padcursor::Move(g_popCur, dx, dy); });
+            }
+            s_held = held;
+            bool click = pad.Pressed(PAD_A);
+            if (who == 1 && kbm::P2MenuPointer()) {
+                int gx = 0, gy = 0; const bool mc = kbm::P2TakeMenuClick();
+                if (splitscreen::PointerGui(1, gx, gy)) GUARDED("p2win popup hover", { padcursor::HoverAt(g_popCur, gx, gy); });
+                click = click || mc;
+            }
+            if (click && g_popCur.root) {
+                bool took = false;
+                GUARDED("p2win popup click", { took = padcursor::Click(g_popCur); });
+                LOG("p2win: player %d answered the popup (took %d)", who + 1, took);
+            }
+            return true;
+        }
+    }
+    if (g_dlg && g_dlgWho == who && HudBusy()) {                     // JPOG81: the HUD player opened a menu / window
+        DlgClose("the other player opened a menu", false);
+        HintFor(who, L"Only one player can use a window at a time - your window was closed", 3.0f);
+        return false;
+    }
     if (g_dlg && g_dlgWho == who) {                                  // JPOG53: player 2's own window
         if (pad.Pressed(PAD_B) || pad.Pressed(PAD_X)) {
             DlgClose(pad.Pressed(PAD_B) ? "B" : "X");
